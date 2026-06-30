@@ -578,9 +578,10 @@ async def cb_support(callback: CallbackQuery):
 
 @router.callback_query(F.data == "about")
 async def cb_about(callback: CallbackQuery):
-    from config import PANELS
+    from database import get_all_panels
     protocols_set = set()
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         for cfg in panel.get("inbounds", {}).values():
             if cfg.get("protocol") == "vless":
                 protocols_set.add(cfg.get("label", "VLESS"))

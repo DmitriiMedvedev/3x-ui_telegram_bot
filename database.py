@@ -144,6 +144,22 @@ async def init_db():
                 created_at  TEXT    DEFAULT (datetime('now'))
             )
         """)
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS panels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                login TEXT NOT NULL,
+                password TEXT NOT NULL,
+                server_host TEXT NOT NULL,
+                inbound_ids TEXT DEFAULT '[]',
+                billing_inbound_ids TEXT DEFAULT '[]',
+                inbounds TEXT DEFAULT '{}'
+            )
+        ''')
+
         await db.commit()
     logger.info("БД инициализирована (v14.1)")
 
@@ -406,3 +422,50 @@ async def expire_old_crypto_invoices():
             "WHERE status='active' AND created_at < datetime('now', '-2 hours')",
         )
         await db.commit()
+
+
+import json
+
+async def get_all_panels() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM panels") as cursor:
+            rows = await cursor.fetchall()
+            panels = []
+            for r in rows:
+                p = dict(r)
+                p['inbound_ids'] = json.loads(p['inbound_ids'])
+                p['billing_inbound_ids'] = json.loads(p['billing_inbound_ids'])
+                p['inbounds'] = {int(k): v for k, v in json.loads(p['inbounds']).items()}
+                panels.append(p)
+            return panels
+
+async def add_panel(name: str, host: str, port: int, path: str, login: str, password: str, server_host: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO panels (name, host, port, path, login, password, server_host) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, host, port, path, login, password, server_host)
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+async def update_panel_inbounds(panel_id: int, inbound_ids: list[int], billing_inbound_ids: list[int], inbounds: dict):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE panels SET inbound_ids = ?, billing_inbound_ids = ?, inbounds = ? WHERE id = ?",
+            (json.dumps(inbound_ids), json.dumps(billing_inbound_ids), json.dumps(inbounds), panel_id)
+        )
+        await db.commit()
+
+async def get_panel(panel_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM panels WHERE id = ?", (panel_id,)) as cursor:
+            r = await cursor.fetchone()
+            if r:
+                p = dict(r)
+                p['inbound_ids'] = json.loads(p['inbound_ids'])
+                p['billing_inbound_ids'] = json.loads(p['billing_inbound_ids'])
+                p['inbounds'] = {int(k): v for k, v in json.loads(p['inbounds']).items()}
+                return p
+            return None

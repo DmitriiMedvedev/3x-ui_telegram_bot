@@ -12,9 +12,8 @@ from typing import Dict, List, Optional, Any, Tuple
 
 import aiohttp
 
-from config import (
-    PANELS, SUB_BASE_URL,
-)
+from config import SUB_BASE_URL
+from database import get_all_panels
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,9 @@ class XUIClient:
         self.loggedIn = set()
 
     async def __aenter__(self) -> "XUIClient":
-        for idx, panel in enumerate(PANELS):
+        panels = await get_all_panels()
+        self.panels_list = panels
+        for idx, panel in enumerate(panels):
             self.sessions[idx] = _new_session()
             if await _login(self.sessions[idx], panel):
                 self.loggedIn.add(idx)
@@ -76,7 +77,7 @@ class XUIClient:
     async def post(self, panel_idx: int, endpoint: str, payload: dict) -> dict | None:
         if panel_idx not in self.loggedIn:
             return None
-        panel = PANELS[panel_idx]
+        panel = self.panels_list[panel_idx]
         base_url = f"https://{panel['host']}:{panel['port']}"
         try:
             async with self.sessions[panel_idx].post(
@@ -186,7 +187,8 @@ async def add_client(email: str, expire_days: int = 0) -> dict | None:
 
     any_success = False
 
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         results = []
         for iid in panel.get("inbound_ids", []):
             obj = _build_client_obj(client_uuid, email, sub_id, iid, panel, exp_ms)
@@ -202,7 +204,7 @@ async def add_client(email: str, expire_days: int = 0) -> dict | None:
     return {
         "uuid":    client_uuid,
         "sub_id":  sub_id,
-        "configs": make_configs(client_uuid, email),
+        "configs": await make_configs(client_uuid, email),
     }
 
 # Enables or disables a client in the 3X-UI panel.
@@ -213,7 +215,8 @@ async def toggle_client(
     sub_id: str = "",
 ) -> bool:
     ok_count = 0
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         for iid in panel.get("inbound_ids", []):
             cfg = panel.get("inbounds", {}).get(iid, {})
             client = {
@@ -246,7 +249,7 @@ async def bulk_toggle(
     try:
         async with XUIClient() as xui:
             for email, client_uuid, enable, sub_id in clients:
-                for idx, panel in enumerate(PANELS):
+                for idx, panel in enumerate(xui.panels_list):
                     for iid in panel.get("inbound_ids", []):
                         cfg = panel.get("inbounds", {}).get(iid, {})
                         client = {
@@ -280,7 +283,8 @@ async def get_client_traffic(email: str) -> dict | None:
     expiry_time = 0
     found = False
 
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         res = await _get_single(panel, f"/panel/api/inbounds/getClientTraffics/{email}")
         if not (res and res.get("success") and res.get("obj")):
             continue
@@ -309,7 +313,8 @@ async def get_client_traffic(email: str) -> dict | None:
 async def get_traffic() -> dict[str, int] | None:
     result: dict[str, int] = {}
     found_any = False
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         res = await _get_single(panel, "/panel/api/inbounds/list")
         if not res or not res.get("success"):
             logger.error(f"get_traffic failed on {panel['name']}: {res}")
@@ -386,9 +391,10 @@ def make_ss_link(email: str, panel: dict) -> str:
             return f"ss://{cred}@{host}:{port}#{label}"
     return ""
 
-def make_configs(client_uuid: str, email: str) -> str:
+async def make_configs(client_uuid: str, email: str) -> str:
     links: list[str] = []
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         for iid in panel.get("inbound_ids", []):
             cfg = panel.get("inbounds", {}).get(iid, {})
             if cfg.get("protocol") == "vless":
@@ -403,7 +409,8 @@ def make_sub_url(sub_id: str) -> str:
 
 async def check_connection() -> bool:
     any_success = False
-    for panel in PANELS:
+    panels = await get_all_panels()
+    for panel in panels:
         async with _new_session() as sess:
             if await _login(sess, panel):
                 any_success = True

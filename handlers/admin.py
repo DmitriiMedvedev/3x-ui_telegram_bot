@@ -16,18 +16,35 @@ from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import ADMIN_IDS, PRICE_PER_GB, SERVER_COST_RUB, CREDIT_LIMIT_RUB
 from database import (
     get_all_users, get_user, update_user, add_balance,
-    add_transaction, get_revenue_stats, create_promo, get_all_promos,
+    add_transaction, get_revenue_stats, create_promo, get_all_promos, add_panel, get_all_panels, update_panel_inbounds, get_panel,
 )
 import xui as XUI
 from billing import billing_tick, fmt_bytes
 from keyboards import kb_admin, kb_back, kb_new_user, kb_new_user
 
 router = Router()
+
+class AddServerStates(StatesGroup):
+    waiting_name = State()
+    waiting_host = State()
+    waiting_port = State()
+    waiting_path = State()
+    waiting_login = State()
+    waiting_password = State()
+    waiting_server_host = State()
+
+class AddInboundStates(StatesGroup):
+    waiting_panel_selection = State()
+    waiting_json = State()
+
 logger = logging.getLogger(__name__)
 
 
@@ -610,3 +627,197 @@ async def cb_adm_card(callback: CallbackQuery):
         reply_markup=kb_new_user(uid),
     )
     await callback.answer()
+
+
+# ── Добавление серверов и конфигов ─────────────────────────────────────────────────────────────
+
+@router.message(Command("addserver"))
+async def cmd_addserver(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.set_state(AddServerStates.waiting_name)
+    await message.answer("Введи понятное название сервера (например, Server 1 (Finland)):")
+
+@router.message(AddServerStates.waiting_name)
+async def process_server_name(message: Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    await state.set_state(AddServerStates.waiting_host)
+    await message.answer("Введи IP или домен для API (например, 127.0.0.1 или panel.domain.com):")
+
+@router.message(AddServerStates.waiting_host)
+async def process_server_host_api(message: Message, state: FSMContext):
+    await state.update_data(host=message.text)
+    await state.set_state(AddServerStates.waiting_port)
+    await message.answer("Введи порт API 3X-UI (например, 29870):")
+
+@router.message(AddServerStates.waiting_port)
+async def process_server_port(message: Message, state: FSMContext):
+    try:
+        port = int(message.text)
+        await state.update_data(port=port)
+        await state.set_state(AddServerStates.waiting_path)
+        await message.answer("Введи секретный путь панели (например, /secretpath):")
+    except ValueError:
+        await message.answer("Порт должен быть числом. Попробуй еще раз:")
+
+@router.message(AddServerStates.waiting_path)
+async def process_server_path(message: Message, state: FSMContext):
+    path = message.text
+    if not path.startswith('/'): path = '/' + path
+    await state.update_data(path=path)
+    await state.set_state(AddServerStates.waiting_login)
+    await message.answer("Введи логин администратора:")
+
+@router.message(AddServerStates.waiting_login)
+async def process_server_login(message: Message, state: FSMContext):
+    await state.update_data(login=message.text)
+    await state.set_state(AddServerStates.waiting_password)
+    await message.answer("Введи пароль администратора:")
+
+@router.message(AddServerStates.waiting_password)
+async def process_server_password(message: Message, state: FSMContext):
+    await state.update_data(password=message.text)
+    await state.set_state(AddServerStates.waiting_server_host)
+    await message.answer("Введи публичный IP сервера (для генерации ссылок, например, 138.124.110.49):")
+
+@router.message(AddServerStates.waiting_server_host)
+async def process_server_server_host(message: Message, state: FSMContext):
+    await state.update_data(server_host=message.text)
+    data = await state.get_data()
+
+    # Check connection
+    import aiohttp
+    import xui
+    import json
+
+    panel_test = {
+        "host": data['host'], "port": data['port'], "path": data['path'],
+        "login": data['login'], "password": data['password'], "name": data['name']
+    }
+
+    await message.answer("⏳ Проверяю подключение...")
+    async with xui._new_session() as sess:
+        ok = await xui._login(sess, panel_test)
+        if ok:
+            panel_id = await add_panel(data['name'], data['host'], data['port'], data['path'], data['login'], data['password'], data['server_host'])
+            await message.answer(f"✅ Сервер успешно добавлен! ID в БД: {panel_id}\n\nТеперь можно добавлять конфиги с помощью /addinbound.")
+
+
+        else:
+            await message.answer("❌ Не удалось подключиться к панели с указанными данными. Сервер не добавлен.")
+
+    await state.clear()
+
+
+@router.message(Command("addinbound"))
+async def cmd_addinbound(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    panels = await get_all_panels()
+    if not panels:
+        await message.answer("Нет добавленных серверов. Сначала добавь сервер через /addserver.")
+        return
+
+    b = InlineKeyboardBuilder()
+    for p in panels:
+        b.button(text=f"{p['name']} ({p['host']})", callback_data=f"selpanel_{p['id']}")
+    b.adjust(1)
+
+    await state.set_state(AddInboundStates.waiting_panel_selection)
+    await message.answer("Выбери сервер, к которому хочешь добавить inbound-конфиг:", reply_markup=b.as_markup())
+
+@router.callback_query(AddInboundStates.waiting_panel_selection, F.data.startswith("selpanel_"))
+async def process_panel_selection(callback: CallbackQuery, state: FSMContext):
+    panel_id = int(callback.data.split("_")[1])
+    await state.update_data(panel_id=panel_id)
+    await state.set_state(AddInboundStates.waiting_json)
+    await callback.message.edit_text("Отлично! Теперь отправь мне сырой JSON инбаунда из 3X-UI панели (включая id, port, protocol, settings, streamSettings).")
+    await callback.answer()
+
+@router.message(AddInboundStates.waiting_json)
+async def process_inbound_json(message: Message, state: FSMContext):
+    try:
+        data = message.text
+        import json
+        inbound = json.loads(data)
+
+        iid = inbound.get("id")
+        port = inbound.get("port")
+        protocol = inbound.get("protocol")
+        stream = inbound.get("streamSettings", {})
+        network = stream.get("network", "tcp")
+        security = stream.get("security", "none")
+
+        cfg = {
+            "label": inbound.get("remark", f"Inbound {iid}"),
+            "protocol": protocol,
+            "port": port,
+            "network": network,
+            "security": security
+        }
+
+        if security == "reality":
+            reality = stream.get("realitySettings", {})
+            settings = reality.get("settings", {})
+            cfg["public_key"] = settings.get("publicKey", "")
+            cfg["fingerprint"] = settings.get("fingerprint", "chrome")
+            cfg["sni"] = reality.get("serverNames", [""])[0] if reality.get("serverNames") else ""
+            cfg["short_id"] = reality.get("shortIds", [""])[0] if reality.get("shortIds") else ""
+
+            # extract flow from first client if exists
+            clients = inbound.get("settings", {}).get("clients", [])
+            if clients and clients[0].get("flow"):
+                cfg["flow"] = clients[0].get("flow")
+            else:
+                cfg["flow"] = ""
+
+        elif security == "tls":
+            tls = stream.get("tlsSettings", {})
+            cfg["sni"] = tls.get("serverName", "")
+
+        if network == "xhttp":
+            xhttp = stream.get("xhttpSettings", {})
+            cfg["path"] = xhttp.get("path", "/")
+            cfg["xhttp_mode"] = xhttp.get("mode", "auto")
+        elif network == "grpc":
+            grpc = stream.get("grpcSettings", {})
+            cfg["grpc_service"] = grpc.get("serviceName", "grpc")
+        elif network == "ws":
+            ws = stream.get("wsSettings", {})
+            cfg["path"] = ws.get("path", "/")
+            cfg["ws_host"] = ws.get("headers", {}).get("Host", "")
+
+        elif protocol == "ss":
+            ss = inbound.get("settings", {})
+            cfg["method"] = ss.get("method", "chacha20-poly1305")
+            cfg["password"] = ss.get("password", "")
+
+
+        # Save to DB
+        s_data = await state.get_data()
+        from database import get_panel, update_panel_inbounds
+        panel = await get_panel(s_data['panel_id'])
+
+        if not panel:
+            await message.answer("Ошибка: Сервер не найден в БД.")
+            await state.clear()
+            return
+
+        inbounds = panel['inbounds']
+        inbounds[iid] = cfg
+
+        inbound_ids = panel['inbound_ids']
+        if iid not in inbound_ids and protocol == "vless":
+            inbound_ids.append(iid)
+
+        billing_inbound_ids = panel['billing_inbound_ids']
+        if iid not in billing_inbound_ids:
+            billing_inbound_ids.append(iid)
+
+        await update_panel_inbounds(panel['id'], inbound_ids, billing_inbound_ids, inbounds)
+
+        await message.answer(f"✅ Инбаунд {iid} успешно добавлен и распарсен:\n<pre>{json.dumps(cfg, indent=2)}</pre>", parse_mode="HTML")
+        await state.clear()
+
+    except json.JSONDecodeError:
+        await message.answer("❌ Это не похоже на валидный JSON. Проверь скобки и запятые.")
+    except Exception as e:
+        await message.answer(f"❌ Произошла ошибка при разборе конфига: {e}")

@@ -17,51 +17,6 @@ ADMIN_USERNAME = "dobrinyaVPN"      # без @, для кнопки поддер
 BOT_USERNAME   = "dobrinyaVPN_bot"  # без @, для реферальных ссылок
 
 
-# ── 3X-UI Panels Configuration ──────────────────────────────────────────────────
-# Configure multiple 3X-UI panels here.
-PANELS = [
-    {
-        "name": "Server 1 (Finland)",
-        "host": "127.0.0.1",
-        "port": 29870,
-        "path": os.getenv("XUI_PATH_1", "/YOUR_SECRET_PATH"),
-        "login": os.getenv("XUI_LOGIN_1", "YOUR_XUI_LOGIN"),
-        "password": os.getenv("XUI_PASSWORD_1", "YOUR_XUI_PASSWORD"),
-        "server_host": os.getenv("SERVER_HOST_1", "YOUR_SERVER_IP"),
-        "inbound_ids": [28, 41],
-        "billing_inbound_ids": [28, 41],
-        "inbounds": {
-            28: {
-                "label":       "Reality-TCP",
-                "protocol":    "vless",
-                "port":        14539,
-                "network":     "tcp",
-                "security":    "reality",
-                "public_key":  os.getenv("XUI_INBOUND_28_PUBKEY", "YOUR_PUBLIC_KEY"),
-                "short_id":    os.getenv("XUI_INBOUND_28_SHORTID", "YOUR_SHORT_ID"),
-                "sni":         "aws.amazon.com",
-                "fingerprint": "firefox",
-                "flow":        "xtls-rprx-vision",
-            },
-            41: {
-                "label":       "XHTTP-Reality",
-                "protocol":    "vless",
-                "port":        56224,
-                "network":     "xhttp",
-                "security":    "reality",
-                "public_key":  os.getenv("XUI_INBOUND_41_PUBKEY", "YOUR_PUBLIC_KEY"),
-                "short_id":    os.getenv("XUI_INBOUND_41_SHORTID", "YOUR_SHORT_ID"),
-                "sni":         "microsoft.com",
-                "fingerprint": "chrome",
-                "flow":        "",
-                "path":        "/",
-                "xhttp_mode":  "auto",
-            }
-        }
-    }
-    # Add more panels here as needed
-]
-
 # ── Subscription Server ────────────────────────────────────────────────────────
 SUB_PORT     = int(os.getenv('SUB_PORT', 8080))
 SUB_BASE_URL = os.getenv('SUB_BASE_URL', f'http://{os.getenv("SERVER_HOST_1", "YOUR_SERVER_IP")}:{SUB_PORT}/sub')
