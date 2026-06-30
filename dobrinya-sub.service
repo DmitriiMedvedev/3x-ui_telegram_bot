@@ -1,0 +1,16 @@
+[Unit]
+Description=Dobrinya VPN Subscription Server v14
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/dobrinya_bot
+ExecStart=/root/dobrinya_bot/venv/bin/python sub_server.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
