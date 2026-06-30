@@ -16,88 +16,56 @@ ADMIN_IDS      = [7148594440]
 ADMIN_USERNAME = "dobrinyaVPN"      # без @, для кнопки поддержки
 BOT_USERNAME   = "dobrinyaVPN_bot"  # без @, для реферальных ссылок
 
-# ── 3X-UI Panel ───────────────────────────────────────────────────────────────
-# Из x-ui.db → settings: webPort=29870, webBasePath=/CmlR1gL2nQBgY1IrEY/
-# Логин/пароль — из env или вставь напрямую
-XUI_LOGIN    = os.getenv("XUI_LOGIN",    "YOUR_XUI_LOGIN")
-XUI_PASSWORD = os.getenv("XUI_PASSWORD", "YOUR_XUI_PASSWORD")
-XUI_HOST     = "127.0.0.1"
-XUI_PORT     = 29870
-XUI_PATH     = os.getenv("XUI_PATH", "/YOUR_SECRET_PATH")   # без слеша на конце
-XUI_BASE_URL = f"https://{XUI_HOST}:{XUI_PORT}"
 
-# ── Сервер ─────────────────────────────────────────────────────────────────────
-SERVER_HOST = os.getenv("SERVER_HOST", "YOUR_SERVER_IP")
-
-# ── Inbound'ы ─────────────────────────────────────────────────────────────────
-# В панели 8 активных inbound'ов. Для бота используем лучшие два:
-#   ID=28  — VLESS Reality TCP    (SNI: aws.amazon.com,  fp: firefox)
-#   ID=41  — VLESS XHTTP Reality  (SNI: microsoft.com,   fp: chrome)
-# Оба — с включённым sniffing, разные транспорты = максимальная совместимость.
-#
-# ИСКЛЮЧЕНЫ из INBOUND_IDS:
-#   ID=35 — дублирует 28 (другой Reality TCP, addClient к двум = двойной счёт трафика)
-#   ID=39 — дублирует 41 (тот же ключ Reality + XHTTP)
-#   ID=37, 38, 42, 43 — security=none, без шифрования (для внутреннего тестирования)
-
-INBOUND_IDS         = [28, 41]   # в эти inbound'ы добавляем клиентов
-BILLING_INBOUND_IDS = [28, 41]   # по этим считаем трафик для списания
-
-# ── Конфигурация inbound'ов (для генерации ссылок) ────────────────────────────
-# Данные извлечены напрямую из x-ui.db → inbounds.stream_settings
-INBOUND_CONFIGS: dict[int, dict] = {
-
-    # ── ID=28: VLESS Reality TCP  ──────────────────────────────────────────────
-    # target: aws.amazon.com:443 | SNI: aws.amazon.com | fp: firefox
-    # Private key: REMOVED_FOR_SECURITY
-    28: {
-        "label":       "Reality-TCP",
-        "protocol":    "vless",
-        "host":        SERVER_HOST,
-        "port":        14539,
-        "network":     "tcp",
-        "security":    "reality",
-        "public_key":  os.getenv("XUI_INBOUND_28_PUBKEY", "YOUR_PUBLIC_KEY"),
-        "short_id":    os.getenv("XUI_INBOUND_28_SHORTID", "YOUR_SHORT_ID"),
-        "sni":         "aws.amazon.com",
-        "fingerprint": "firefox",
-        "flow":        "xtls-rprx-vision",
-    },
-
-    # ── ID=41: VLESS XHTTP Reality  ───────────────────────────────────────────
-    # target: www.microsoft.com:443 | SNI: microsoft.com | fp: chrome
-    # Private key: REMOVED_FOR_SECURITY
-    # Тот же ключ что и у ID=39 (vlss_xttp_reality_no_snif) — разные SNI
-    41: {
-        "label":       "XHTTP-Reality",
-        "protocol":    "vless",
-        "host":        SERVER_HOST,
-        "port":        56224,
-        "network":     "xhttp",
-        "security":    "reality",
-        "public_key":  os.getenv("XUI_INBOUND_41_PUBKEY", "YOUR_PUBLIC_KEY"),
-        "short_id":    os.getenv("XUI_INBOUND_41_SHORTID", "YOUR_SHORT_ID"),
-        "sni":         "microsoft.com",
-        "fingerprint": "chrome",
-        "flow":        "",        # у XHTTP flow не нужен
-        "path":        "/",
-        "xhttp_mode":  "auto",     # из x-ui.db: xhttpSettings.mode
-    },
-
-    # ── Остальные inbound'ы — справочно, не входят в INBOUND_IDS ──────────────
-    # 35: Reality TCP (dl.google.com, fp=chrome)   — дубль 28
-    # 39: XHTTP Reality (www.oracle.com, fp=edge)  — дубль 41 (тот же ключ)
-    # 37: VLESS plain TCP no-sniff, port=49395     — без шифрования
-    # 38: VLESS plain TCP sniff,    port=41037     — без шифрования
-    # 42: VLESS XHTTP plain sniff,  port=23780     — без шифрования
-    # 43: VLESS XHTTP plain no-sniff, port=43644   — без шифрования
-}
+# ── 3X-UI Panels Configuration ──────────────────────────────────────────────────
+# Configure multiple 3X-UI panels here.
+PANELS = [
+    {
+        "name": "Server 1 (Finland)",
+        "host": "127.0.0.1",
+        "port": 29870,
+        "path": os.getenv("XUI_PATH_1", "/YOUR_SECRET_PATH"),
+        "login": os.getenv("XUI_LOGIN_1", "YOUR_XUI_LOGIN"),
+        "password": os.getenv("XUI_PASSWORD_1", "YOUR_XUI_PASSWORD"),
+        "server_host": os.getenv("SERVER_HOST_1", "YOUR_SERVER_IP"),
+        "inbound_ids": [28, 41],
+        "billing_inbound_ids": [28, 41],
+        "inbounds": {
+            28: {
+                "label":       "Reality-TCP",
+                "protocol":    "vless",
+                "port":        14539,
+                "network":     "tcp",
+                "security":    "reality",
+                "public_key":  os.getenv("XUI_INBOUND_28_PUBKEY", "YOUR_PUBLIC_KEY"),
+                "short_id":    os.getenv("XUI_INBOUND_28_SHORTID", "YOUR_SHORT_ID"),
+                "sni":         "aws.amazon.com",
+                "fingerprint": "firefox",
+                "flow":        "xtls-rprx-vision",
+            },
+            41: {
+                "label":       "XHTTP-Reality",
+                "protocol":    "vless",
+                "port":        56224,
+                "network":     "xhttp",
+                "security":    "reality",
+                "public_key":  os.getenv("XUI_INBOUND_41_PUBKEY", "YOUR_PUBLIC_KEY"),
+                "short_id":    os.getenv("XUI_INBOUND_41_SHORTID", "YOUR_SHORT_ID"),
+                "sni":         "microsoft.com",
+                "fingerprint": "chrome",
+                "flow":        "",
+                "path":        "/",
+                "xhttp_mode":  "auto",
+            }
+        }
+    }
+    # Add more panels here as needed
+]
 
 # ── Subscription Server ────────────────────────────────────────────────────────
-# sub_server.py слушает SUB_PORT и отдаёт base64-подписку пользователям бота.
-# Нативная подписка 3X-UI: http://SERVER_HOST:2096/sub/{subId}
-SUB_PORT     = 8080
-SUB_BASE_URL = f"http://{SERVER_HOST}:{SUB_PORT}/sub"
+SUB_PORT     = int(os.getenv('SUB_PORT', 8080))
+SUB_BASE_URL = os.getenv('SUB_BASE_URL', f'http://{os.getenv("SERVER_HOST_1", "YOUR_SERVER_IP")}:{SUB_PORT}/sub')
+
 
 # ── Тарифы и оплата ────────────────────────────────────────────────────────────
 PRICE_PER_GB     = 3.0          # рублей за гигабайт

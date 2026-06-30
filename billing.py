@@ -42,7 +42,7 @@ def _topup_kb() -> InlineKeyboardMarkup:
 
 async def billing_tick(bot=None):
     """
-    1. Получает трафик из 3X-UI по BILLING_INBOUND_IDS.
+    1. Получает трафик из 3X-UI со всех сконфигурированных серверов.
     2. Считает дельту, списывает баланс.
     3. Собирает три списка:
          to_warn   — баланс пересёк WARN_BALANCE_RUB (-30₽) впервые

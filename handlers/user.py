@@ -578,11 +578,13 @@ async def cb_support(callback: CallbackQuery):
 
 @router.callback_query(F.data == "about")
 async def cb_about(callback: CallbackQuery):
-    from config import INBOUND_CONFIGS
-    protocols = ", ".join(
-        cfg["label"] for cfg in INBOUND_CONFIGS.values()
-        if cfg.get("protocol") == "vless"
-    )
+    from config import PANELS
+    protocols_set = set()
+    for panel in PANELS:
+        for cfg in panel.get("inbounds", {}).values():
+            if cfg.get("protocol") == "vless":
+                protocols_set.add(cfg.get("label", "VLESS"))
+    protocols = ", ".join(protocols_set)
     await callback.message.edit_text(
         f"❓ <b>О сервисе</b>\n\n"
         f"🛡 <b>Dobrinya VPN</b>\n"
