@@ -8,7 +8,7 @@ import uuid
 import logging
 import urllib.parse
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict
 
 import aiohttp
 

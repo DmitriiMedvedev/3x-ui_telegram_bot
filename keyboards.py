@@ -1,7 +1,7 @@
 """keyboards.py — Bot keyboards."""
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from config import PRICE_PER_GB, REFERRAL_PERCENT, ADMIN_USERNAME, CREDIT_LIMIT_RUB
+from config import PRICE_PER_GB
 
 
 def kb_main() -> InlineKeyboardMarkup:

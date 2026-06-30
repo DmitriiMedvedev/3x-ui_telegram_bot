@@ -28,7 +28,7 @@ from database import (
 )
 import xui as XUI
 from billing import billing_tick, fmt_bytes
-from keyboards import kb_admin, kb_back, kb_new_user, kb_new_user
+from keyboards import kb_admin, kb_back, kb_new_user
 
 router = Router()
 
@@ -686,7 +686,6 @@ async def process_server_server_host(message: Message, state: FSMContext):
 
     # Check connection
     import aiohttp
-    import xui
     import json
 
     panel_test = {
@@ -695,8 +694,8 @@ async def process_server_server_host(message: Message, state: FSMContext):
     }
 
     await message.answer("⏳ Проверяю подключение...")
-    async with xui._new_session() as sess:
-        ok = await xui._login(sess, panel_test)
+    async with XUI._new_session() as sess:
+        ok = await XUI._login(sess, panel_test)
         if ok:
             panel_id = await add_panel(data['name'], data['host'], data['port'], data['path'], data['login'], data['password'], data['server_host'])
             await message.answer(f"✅ Сервер успешно добавлен! ID в БД: {panel_id}\n\nТеперь можно добавлять конфиги с помощью /addinbound.")
