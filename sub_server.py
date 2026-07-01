@@ -109,9 +109,16 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
             net, sec = cfg.get("network", "tcp"), cfg.get("security", "none")
             params = {"type": net, "security": sec}
             if sec == "reality":
-                params.update({"pbk": cfg.get("public_key", ""), "fp": cfg.get("fingerprint", "chrome"), "sni": cfg.get("sni", ""), "sid": cfg.get("short_id", "")})
+                params.update({
+                    "pbk": cfg.get("public_key", ""),
+                    "fp": cfg.get("fingerprint", "chrome"),
+                    "sni": cfg.get("sni", ""),
+                    "sid": cfg.get("short_id", ""),
+                    "spx": cfg.get("spiderX", "/")
+                })
                 if cfg.get("flow"): params["flow"] = cfg["flow"]
-            elif sec == "tls": params["sni"] = cfg.get("sni", "")
+            elif sec == "tls":
+                params["sni"] = cfg.get("sni", "")
             if net == "xhttp":
                 params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
                 if cfg.get("ws_host"): params["host"] = cfg["ws_host"]

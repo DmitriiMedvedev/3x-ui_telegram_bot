@@ -317,7 +317,9 @@ def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) 
         if cfg.get("flow"): params["flow"] = cfg["flow"]
     elif sec == "tls":
         params["sni"] = cfg.get("sni", "")
-    if network == "xhttp": params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
+    if network == "xhttp":
+        params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
+        if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
     elif network == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
     elif network == "ws":
         params["path"] = cfg.get("path", "/")

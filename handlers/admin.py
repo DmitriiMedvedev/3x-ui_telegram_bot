@@ -137,7 +137,8 @@ async def panel_cfg(callback: CallbackQuery):
     if not ibs: text += "— нет данных —"
     for iid, cfg in ibs.items():
         text += f"• [{iid}] {cfg.get('protocol')} - {cfg.get('label')}\n"
-        b.button(text=f"🗑 Удал. {iid}", callback_data=f"pdel_ib_{pid}_{iid}")
+        b.button(text=f"🗑 {iid}", callback_data=f"pdel_ib_{pid}_{iid}")
+    b.button(text="🌐 Обновить из 3X-UI", callback_data=f"psync_ibs_{pid}")
     b.button(text="🗑 Удалить сервер", callback_data=f"pdel_srv_{pid}")
     b.button(text="◀️ Назад", callback_data="adm_panels")
     b.adjust(2, 1)
@@ -161,7 +162,69 @@ async def pdel_ib(callback: CallbackQuery):
     ib_ids = [str(x) for x in p.get('inbound_ids', []) if str(x) != iid]
     bib_ids = [str(x) for x in p.get('billing_inbound_ids', []) if str(x) != iid]
     await update_panel_inbounds(pid, ib_ids, bib_ids, ibs)
-    await callback.answer(f"Конфиг {iid} удален")
+    await callback.answer(f"Удален")
+    await panel_cfg(callback)
+
+@router.callback_query(F.data.startswith("psync_ibs_"))
+async def psync_ibs(callback: CallbackQuery):
+    pid = int(callback.data.split("_")[-1])
+    p = await get_panel(pid)
+    if not p: return
+
+    res = await XUI._get_single(p, "/panel/api/inbounds/list")
+    if not (res and res.get("success") and res.get("obj")):
+        return await callback.answer("❌ Ошибка API или данных")
+
+    ibs, ib_ids, bib_ids = {}, [], []
+    for ib in res["obj"]:
+        iid, prot = str(ib["id"]), str(ib["protocol"]).lower()
+        if prot == "shadowsocks": prot = "ss"
+
+        stream = ib.get("streamSettings", {})
+        cfg = {
+            "label": ib.get("remark", f"Inbound {iid}"),
+            "protocol": prot, "port": ib.get("port"),
+            "network": stream.get("network", "tcp"), "security": stream.get("security", "none")
+        }
+
+        # Парсинг транспорта
+        net = cfg["network"]
+        if net == "xhttp":
+            xs = stream.get("xhttpSettings", {})
+            cfg.update({"path": xs.get("path", "/"), "xhttp_mode": xs.get("mode", "auto"), "ws_host": xs.get("host", "")})
+        elif net == "ws":
+            ws = stream.get("wsSettings", {})
+            cfg.update({"path": ws.get("path", "/"), "ws_host": ws.get("headers", {}).get("Host", "")})
+        elif net == "grpc":
+            gs = stream.get("grpcSettings", {})
+            cfg.update({"grpc_service": gs.get("serviceName", "")})
+
+        # Парсинг безопасности
+        if cfg["security"] == "reality":
+            rs = stream.get("realitySettings", {})
+            cfg.update({
+                "public_key": rs.get("settings", {}).get("publicKey", ""),
+                "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"),
+                "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
+                "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
+                "spiderX": rs.get("settings", {}).get("spiderX", "/")
+            })
+            cls = ib.get("settings", {}).get("clients", [])
+            cfg["flow"] = cls[0].get("flow", "") if cls else ""
+        elif cfg["security"] == "tls":
+            ts = stream.get("tlsSettings", {})
+            cfg.update({"sni": ts.get("serverName", "")})
+
+        if prot == "ss":
+            s_set = ib.get("settings", {})
+            cfg.update({"method": s_set.get("method"), "password": s_set.get("password")})
+
+        ibs[iid] = cfg
+        if prot == "vless": ib_ids.append(iid)
+        bib_ids.append(iid)
+
+    await update_panel_inbounds(pid, ib_ids, bib_ids, ibs)
+    await callback.answer(f"✅ Синхронизировано {len(ibs)} конфигов")
     await panel_cfg(callback)
 
 # ── Добавление серверов ──
