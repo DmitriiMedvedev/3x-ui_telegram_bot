@@ -178,19 +178,38 @@ def _build_client_obj(
     }
 
 async def _add_to_inbound(panel: dict, inbound_id: int, client_obj: dict) -> bool:
+    # Пытаемся добавить клиента. Если inbound_id не числовой, это может быть проблемой для некоторых панелей.
     payload = {
         "id":       str(inbound_id),
         "settings": json.dumps({"clients": [client_obj]})
     }
+
     for attempt in range(_ADD_RETRIES):
         res = await _post_single(panel, "/panel/api/inbounds/addClient", payload)
         if res:
-            if res.get("success") or "already exists" in str(res.get("msg", "")).lower():
-                logger.info(f"addClient inbound={inbound_id} email={client_obj['email']} on {panel['name']} ✓")
+            if res.get("success"):
+                logger.info(f"addClient success: inbound={inbound_id} email={client_obj['email']} on {panel['name']}")
                 return True
+            msg = str(res.get("msg", "")).lower()
+            if "already exists" in msg or "duplicate" in msg:
+                logger.info(f"addClient: client already exists inbound={inbound_id} email={client_obj['email']} on {panel['name']}")
+                return True
+            logger.warning(f"addClient failed on {panel['name']}: {res.get('msg')}")
+
         if attempt < _ADD_RETRIES - 1:
             await asyncio.sleep(_RETRY_DELAYS[attempt])
     return False
+
+async def get_real_inbound_id(panel: dict, tag_or_port) -> int | None:
+    """Находит числовой ID инбаунда по его тегу или порту."""
+    res = await _get_single(panel, "/panel/api/inbounds/list")
+    if not res or not res.get("success") or not res.get("obj"):
+        return None
+
+    for ib in res["obj"]:
+        if str(ib.get("tag")) == str(tag_or_port): return ib.get("id")
+        if str(ib.get("port")) == str(tag_or_port): return ib.get("id")
+    return None
 
 # Adds a client to all panels in the background.
 async def add_client_background(email: str, client_uuid: str, sub_id: str, expire_days: int = 0):

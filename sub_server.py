@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-sub_server.py — Multi-Panel Subscription Proxy v17.0.
-Fetches native subscriptions from 3X-UI panels and aggregates them.
-Ensures 100% compatibility with 3X-UI standards.
+sub_server.py — Multi-Panel Subscription Proxy & Generator v17.1.
+Aggregates native subscriptions from 3X-UI panels.
+Fallbacks to manual generation if panels are unreachable.
 """
 import base64
 import sqlite3
@@ -49,84 +49,138 @@ def get_active_panels() -> list[dict]:
     try:
         conn = get_db_conn()
         rows = conn.execute("SELECT * FROM panels").fetchall()
-        return [dict(r) for r in rows]
+        res = []
+        for r in rows:
+            p = dict(r)
+            # Декодируем inbounds из JSON
+            try: p['inbounds'] = json.loads(p.get('inbounds') or '{}')
+            except: p['inbounds'] = {}
+            res.append(p)
+        return res
     except: return []
     finally:
         if conn: conn.close()
 
 async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: str) -> str:
-    """Запрашивает нативную подписку с конкретной панели."""
-    host = panel.get('host', "").strip()
+    """Запрашивает нативную подписку с конкретной панели, перебирая варианты URL."""
+    host = panel.get('host', "").strip().strip(".")
     if not host: return ""
 
-    # Пытаемся угадать URL подписки. Обычно это /sub/{sub_id}
-    # Но в некоторых версиях может быть /sub/v2/{sub_id}
-    url = f"https://{host}:{panel['port']}/sub/{sub_id}"
+    # Варианты путей
+    base_paths = ["", panel.get('path', "")]
+    sub_paths = ["/sub", "/sub/v2"]
 
-    try:
-        async with session.get(url, timeout=5, ssl=False) as resp:
-            if resp.status == 200:
-                return await resp.text()
-            else:
-                logger.warning(f"Panel {panel['name']} returned {resp.status} for {url}")
-    except Exception as e:
-        logger.error(f"Error fetching from {panel['name']}: {e}")
+    for proto in ["https", "http"]:
+        for bp in base_paths:
+            bp = bp.strip("/")
+            if bp: bp = "/" + bp
+            for sp in sub_paths:
+                url = f"{proto}://{host}:{panel['port']}{bp}{sp}/{sub_id}"
+                try:
+                    async with session.get(url, timeout=2.5, ssl=False) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            if text and len(text) > 10:
+                                logger.info(f"Success fetching sub from {panel['name']} via {url}")
+                                return text
+                except: pass
     return ""
 
 def decode_sub(content: str) -> list[str]:
-    """Декодирует base64 подписку в список ссылок."""
+    """Декодирует base64 или plain-text подписку в список ссылок."""
+    if not content or not content.strip(): return []
     try:
-        if not content.strip(): return []
-        # Добавляем padding если нужно
-        missing_padding = len(content) % 4
-        if missing_padding: content += '=' * (4 - missing_padding)
-
-        decoded = base64.b64decode(content).decode('utf-8', errors='ignore')
+        # Пробуем декодировать как base64
+        data = content.strip()
+        missing_padding = len(data) % 4
+        if missing_padding: data += '=' * (4 - missing_padding)
+        decoded = base64.b64decode(data).decode('utf-8', errors='ignore')
         return [l.strip() for l in decoded.split('\n') if l.strip()]
-    except Exception as e:
-        logger.error(f"Decode error: {e}")
-        return []
+    except:
+        # Если не base64, возможно это просто список ссылок
+        return [l.strip() for l in content.split('\n') if l.strip() and "://" in l]
+
+def make_fallback_link(u_uuid, email, panel, cfg, iid):
+    """Генерация ссылки вручную, если проксирование не сработало."""
+    try:
+        prot = str(cfg.get("protocol", "")).lower()
+        if prot == "shadowsocks": prot = "ss"
+        host = cfg.get("host") or panel.get("server_host") or panel.get("host") or "127.0.0.1"
+        port = cfg.get("port", 443)
+        label = urllib.parse.quote(f"{email}-{panel.get('name')}-{cfg.get('label', iid)}")
+
+        if prot == "vless":
+            net, sec = cfg.get("network", "tcp"), cfg.get("security", "none")
+            params = {"type": net, "security": sec}
+            if sec == "reality":
+                params.update({"pbk": cfg.get("public_key", ""), "fp": cfg.get("fingerprint", "chrome"), "sni": cfg.get("sni", ""), "sid": cfg.get("short_id", "")})
+                if cfg.get("flow"): params["flow"] = cfg["flow"]
+            elif sec == "tls": params["sni"] = cfg.get("sni", "")
+            if net == "xhttp":
+                params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
+                if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
+            elif net == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
+            elif net == "ws":
+                params["path"] = cfg.get("path", "/")
+                if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
+            query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items() if v)
+            return f"vless://{u_uuid}@{host}:{port}?{query}#{label}"
+        elif prot == "ss":
+            m, pwd = cfg.get("method"), cfg.get("password")
+            if not (m and pwd): return None
+            cred = base64.b64encode(f"{m}:{pwd}".encode()).decode()
+            return f"ss://{cred}@{host}:{port}#{label}"
+        elif prot == "trojan":
+            return f"trojan://{u_uuid}@{host}:{port}?security=tls&sni={cfg.get('sni', '')}#{label}"
+    except: pass
+    return None
 
 async def handle_sub(request: web.Request) -> web.Response:
     try:
         sub_id = request.match_info.get("sub_id", "")
         user = get_user_by_sub(sub_id)
-        if not user: return web.Response(text=f"ERROR: Sub ID '{sub_id}' not found.", status=404)
+        if not user: return web.Response(text=f"ERROR: User with Sub ID '{sub_id}' not found in Database.", status=404)
 
+        u_uuid, email = user.get("vless_uuid"), f"user_{user['tg_id']}"
         panels = get_active_panels()
         all_links = []
 
+        # 1. Пытаемся получить нативные ссылки (Proxy mode)
         async with aiohttp.ClientSession() as session:
             tasks = [fetch_panel_sub(session, p, user['sub_id']) for p in panels]
             results = await asyncio.gather(*tasks)
-
             for res in results:
-                if res:
-                    all_links.extend(decode_sub(res))
+                if res: all_links.extend(decode_sub(res))
+
+        # 2. Если проксирование не дало результатов, генерируем сами (Fallback mode)
+        if not all_links:
+            logger.info(f"Sub {sub_id}: Proxy failed or returned no links. Using fallback generator.")
+            for p in panels:
+                ibs = p.get("inbounds") or {}
+                for iid, cfg in ibs.items():
+                    link = make_fallback_link(u_uuid, email, p, cfg, iid)
+                    if link: all_links.append(link)
 
         if not all_links:
-            # Если не удалось получить с панелей, пробуем сгенерировать сами (резервный вариант)
-            return web.Response(text="ERROR: No configurations found on remote panels.", status=404)
+            return web.Response(text=f"ERROR: No active configurations found for user {email} on any panel.\nCheck if Inbounds are added in /admin and /sync was performed.", status=404)
 
-        # Удаляем дубликаты
         unique_links = list(dict.fromkeys(all_links))
-
         content = base64.b64encode("\n".join(unique_links).encode()).decode()
+
         return web.Response(
             text=content,
             headers={
                 "Content-Type": "text/plain; charset=utf-8",
                 "Profile-Title": f"VPN | {user.get('balance',0):.1f} RUB",
-                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire=0" # Можно добавить реальные данные если нужно
+                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire=0"
             }
         )
     except Exception as e:
         logger.exception("Fatal error in sub_server")
-        return web.Response(text=f"FATAL: {str(e)}", status=500)
+        return web.Response(text=f"FATAL ERROR: {str(e)}", status=500)
 
 async def handle_index(request):
-    db_exists = os.path.exists(DB_PATH)
-    return web.Response(text=f"Subscription Server v17.0 (Proxy Mode) is active.\nDB Path: {DB_PATH}\nStatus: {'✅ OK' if db_exists else '❌ NOT FOUND'}")
+    return web.Response(text=f"Dobrinya Subscription Server v17.1 is active.\nDB: {'✅' if os.path.exists(DB_PATH) else '❌ NOT FOUND'}")
 
 app = web.Application()
 app.router.add_get("/", handle_index)

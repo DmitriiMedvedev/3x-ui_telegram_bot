@@ -303,6 +303,13 @@ async def process_inbound_json(message: Message, state: FSMContext):
         if str(iid) not in ib_ids and prot == "vless": ib_ids.append(str(iid))
         if str(iid) not in bib_ids: bib_ids.append(str(iid))
 
+        # Пытаемся найти реальный ID если iid это тег
+        real_id = await XUI.get_real_inbound_id(panel, iid)
+        if real_id and str(real_id) != str(iid):
+            if str(real_id) not in ib_ids and prot == "vless": ib_ids.append(str(real_id))
+            if str(real_id) not in bib_ids: bib_ids.append(str(real_id))
+            logger.info(f"Mapping tag/port {iid} to real ID {real_id}")
+
         await update_panel_inbounds(panel['id'], ib_ids, bib_ids, inbounds)
         await message.answer(f"✅ Конфиг {iid} ({prot}) успешно добавлен на {panel['name']}.")
     except Exception as e: await message.answer(f"❌ Ошибка парсинга: {e}")
@@ -316,6 +323,22 @@ async def cmd_billing(message: Message, bot: Bot):
     await message.answer("⏳ Billing tick...")
     await billing_tick(bot)
     await message.answer("✅ Готово.")
+
+@router.message(Command("debugtraffic"))
+async def cmd_debugtraffic(message: Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("⏳ Запрашиваю трафик из 3X-UI...")
+    traffic = await XUI.get_traffic()
+    users = await get_all_users()
+    if traffic is None: return await message.answer("❌ Ошибка связи с 3X-UI")
+    lines = ["🔍 <b>Диагностика трафика</b>\n"]
+    for u in users[:20]:
+        if u.get("vless_uuid"):
+            email = f"user_{u['tg_id']}"
+            found = "✅" if email in traffic else "❌"
+            val = traffic.get(email, 0)
+            lines.append(f"{found} {email} | {fmt_bytes(val)} | bal={u['balance']:.1f}₽")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 @router.message(Command("setbalance"))
 async def cmd_setbalance(message: Message, bot: Bot):
