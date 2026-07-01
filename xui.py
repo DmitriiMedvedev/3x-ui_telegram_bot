@@ -236,8 +236,21 @@ async def toggle_client(email: str, client_uuid: str, enable: bool, sub_id: str 
     ok_count = 0
     panels = await get_all_panels()
     for panel in panels:
-        for iid in panel.get("inbound_ids", []):
-            cfg = panel.get("inbounds", {}).get(str(iid)) or panel.get("inbounds", {}).get(int(iid)) or {}
+        # Пытаемся найти все инбаунды на панели через API
+        res = await _get_single(panel, "/panel/api/inbounds/list")
+        if not (res and res.get("success") and res.get("obj")):
+            # Если API недоступно, пробуем те что в БД
+            ib_ids = panel.get("inbound_ids", [])
+        else:
+            # Находим все инбаунды, где есть этот клиент
+            ib_ids = []
+            for ib in res["obj"]:
+                cls = json.loads(ib.get("settings", "{}")).get("clients", [])
+                if any(c.get("id") == client_uuid or c.get("email") == email for c in cls):
+                    ib_ids.append(ib["id"])
+
+        for iid in ib_ids:
+            cfg = panel.get("inbounds", {}).get(str(iid)) or {}
             client = {
                 "id": client_uuid, "email": email, "enable": enable, "flow": cfg.get("flow", ""),
                 "limitIp": 0, "totalGB": 0, "alterId": 0, "tgId": "", "expiryTime": 0, "subId": sub_id,
