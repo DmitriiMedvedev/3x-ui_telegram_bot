@@ -82,6 +82,7 @@ def _safe_json_dict(data) -> dict:
 # ── Users ──
 
 async def get_or_create_user(tg_id: int, username: str, full_name: str, referred_by: int | None = None) -> tuple[dict, bool]:
+    from config import FREE_BONUS_RUB
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         row = await (await db.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))).fetchone()
@@ -93,7 +94,7 @@ async def get_or_create_user(tg_id: int, username: str, full_name: str, referred
                 await db.commit()
             return u, False
         u_uuid, u_sub = str(uuid.uuid4()), uuid.uuid4().hex
-        await db.execute("INSERT INTO users (tg_id,username,full_name,referred_by,vless_uuid,sub_id) VALUES (?,?,?,?,?,?)", (tg_id, username, full_name, referred_by, u_uuid, u_sub))
+        await db.execute("INSERT INTO users (tg_id,username,full_name,referred_by,vless_uuid,sub_id,balance) VALUES (?,?,?,?,?,?,?)", (tg_id, username, full_name, referred_by, u_uuid, u_sub, FREE_BONUS_RUB))
         await db.commit()
         row = await (await db.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))).fetchone()
         return dict(row), True

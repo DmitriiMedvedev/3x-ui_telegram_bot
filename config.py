@@ -12,7 +12,12 @@ load_dotenv()
 
 # ── Telegram ───────────────────────────────────────────────────────────────────
 BOT_TOKEN      = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН_БОТА")
-ADMIN_IDS      = [7148594440]
+try:
+    _admin_ids_raw = os.getenv("ADMIN_IDS", "7148594440")
+    ADMIN_IDS = [int(i.strip()) for i in _admin_ids_raw.split(",") if i.strip()]
+except:
+    ADMIN_IDS = [7148594440]
+
 ADMIN_USERNAME = "dobrinyaVPN"      # без @, для кнопки поддержки
 BOT_USERNAME   = "dobrinyaVPN_bot"  # без @, для реферальных ссылок
 

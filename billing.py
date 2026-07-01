@@ -78,47 +78,42 @@ async def billing_tick(bot=None):
             continue
 
         # ── Трафик и биллинг ──────────────────────────────────────────────────
-        old_bal = u.get("balance", 0)
+        bal = u.get("balance", 0)
+        old_bal = bal
 
         if email in traffic:
-            curr  = traffic[email]
-            last  = u.get("last_traffic_bytes") or 0
+            curr = traffic[email]
+            last = u.get("last_traffic_bytes") or 0
             delta = curr if curr < last else curr - last
             new_total = (u.get("total_traffic_bytes") or 0) + delta
 
-            await update_user(uid,
-                last_traffic_bytes=curr,
-                total_traffic_bytes=new_total,
-            )
-
             if delta >= 524_288:
                 cost = round((delta / 1_073_741_824) * PRICE_PER_GB, 4)
-                await add_balance(uid, -cost)
+                bal -= cost
+                await update_user(uid,
+                    last_traffic_bytes=curr,
+                    total_traffic_bytes=new_total,
+                    balance=bal
+                )
                 billed += 1
                 logger.info(f"{email}: -{fmt_bytes(delta)} | -{cost:.4f} ₽")
+            else:
+                await update_user(uid, last_traffic_bytes=curr, total_traffic_bytes=new_total)
         else:
             logger.debug(f"{email}: отсутствует в clientStats")
 
-        # ── Свежие данные после списания ──────────────────────────────────────
-        fresh = await get_user(uid)
-        if fresh is None:
-            logger.warning(f"billing_tick: пользователь {uid} исчез из БД")
-            continue
-
-        bal       = fresh["balance"]
-        is_banned = bool(fresh.get("is_banned"))
+        # ── Проверка состояний ──────────────────────────────────────
+        is_banned = bool(u.get("is_banned"))
         should_en = bal > CREDIT_LIMIT_RUB and not is_banned
         was_en    = bool(u.get("xui_enabled", 1))
 
         # ── Предупреждение при −30₽ ───────────────────────────────────────────
-        # Условие: баланс только что пересёк WARN_BALANCE_RUB сверху вниз,
-        # ещё не отключён (выше CREDIT_LIMIT_RUB), уведомление ещё не слали.
         just_warned = (
             bot
             and not is_banned
             and CREDIT_LIMIT_RUB < bal <= WARN_BALANCE_RUB
-            and old_bal > WARN_BALANCE_RUB          # пересёк именно в этом тике
-            and not fresh.get("notified_low_balance")
+            and old_bal > WARN_BALANCE_RUB
+            and not u.get("notified_low_balance")
         )
         if just_warned:
             to_warn.append(uid)
@@ -176,10 +171,10 @@ async def billing_tick(bot=None):
 
 
 async def billing_loop(bot):
-    logger.info("Планировщик трафика запущен (первое списание через 1 час)")
+    logger.info("Планировщик трафика запущен (первое списание немедленно)")
     while True:
-        await asyncio.sleep(3600)
         try:
             await billing_tick(bot)
         except Exception as e:
             logger.error(f"billing_loop error: {e}", exc_info=True)
+        await asyncio.sleep(3600)

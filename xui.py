@@ -267,6 +267,8 @@ async def get_traffic() -> dict[str, int] | None:
     result, found_any = {}, False
     panels = await get_all_panels()
     for panel in panels:
+        host = panel.get('host', "").strip()
+        if not host: continue
         res = await _get_single(panel, "/panel/api/inbounds/list")
         if not res or not res.get("success"): continue
         found_any = True
