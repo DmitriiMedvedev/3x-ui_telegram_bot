@@ -37,8 +37,10 @@ class AddServerStates(StatesGroup):
     waiting_host = State()
     waiting_port = State()
     waiting_path = State()
+    waiting_auth_method = State()
     waiting_login = State()
     waiting_password = State()
+    waiting_api_token = State()
     waiting_server_host = State()
 
 class AddInboundStates(StatesGroup):
@@ -71,6 +73,8 @@ async def cmd_admin(message: Message):
         f"/addpromo КОД РУБ USES\n"
         f"/reply ID текст\n"
         f"/broadcast текст\n"
+        f"/addserver — подключить 3X-UI\n"
+        f"/addinbound — добавить конфиг к серверу\n"
         f"/setbalance ID СУММА\n"
         f"/ban ID | /unban ID\n"
         f"/billing — принудительное списание\n"
@@ -664,8 +668,26 @@ async def process_server_path(message: Message, state: FSMContext):
     path = message.text
     if not path.startswith('/'): path = '/' + path
     await state.update_data(path=path)
+
+    b = InlineKeyboardBuilder()
+    b.button(text="Login/Password", callback_data="auth_login")
+    b.button(text="API Token (Bearer)", callback_data="auth_token")
+    b.adjust(2)
+
+    await state.set_state(AddServerStates.waiting_auth_method)
+    await message.answer("Выбери способ авторизации в панели:", reply_markup=b.as_markup())
+
+@router.callback_query(AddServerStates.waiting_auth_method, F.data == "auth_login")
+async def auth_method_login(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AddServerStates.waiting_login)
-    await message.answer("Введи логин администратора:")
+    await callback.message.edit_text("Введи логин администратора:")
+    await callback.answer()
+
+@router.callback_query(AddServerStates.waiting_auth_method, F.data == "auth_token")
+async def auth_method_token(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddServerStates.waiting_api_token)
+    await callback.message.edit_text("Введи API Token (Bearer):")
+    await callback.answer()
 
 @router.message(AddServerStates.waiting_login)
 async def process_server_login(message: Message, state: FSMContext):
@@ -675,9 +697,15 @@ async def process_server_login(message: Message, state: FSMContext):
 
 @router.message(AddServerStates.waiting_password)
 async def process_server_password(message: Message, state: FSMContext):
-    await state.update_data(password=message.text)
+    await state.update_data(password=message.text, api_token="")
     await state.set_state(AddServerStates.waiting_server_host)
-    await message.answer("Введи публичный IP сервера (для генерации ссылок, например, 138.124.110.49):")
+    await message.answer("Введи публичный IP сервера (для генерации ссылок):")
+
+@router.message(AddServerStates.waiting_api_token)
+async def process_server_api_token(message: Message, state: FSMContext):
+    await state.update_data(api_token=message.text, login="", password="")
+    await state.set_state(AddServerStates.waiting_server_host)
+    await message.answer("Введи публичный IP сервера (для генерации ссылок):")
 
 @router.message(AddServerStates.waiting_server_host)
 async def process_server_server_host(message: Message, state: FSMContext):
@@ -685,24 +713,32 @@ async def process_server_server_host(message: Message, state: FSMContext):
     data = await state.get_data()
 
     # Check connection
-    import aiohttp
-    import json
-
     panel_test = {
         "host": data['host'], "port": data['port'], "path": data['path'],
-        "login": data['login'], "password": data['password'], "name": data['name']
+        "login": data.get('login', ""), "password": data.get('password', ""),
+        "api_token": data.get('api_token', ""), "name": data['name']
     }
 
     await message.answer("⏳ Проверяю подключение...")
-    async with XUI._new_session() as sess:
-        ok = await XUI._login(sess, panel_test)
-        if ok:
-            panel_id = await add_panel(data['name'], data['host'], data['port'], data['path'], data['login'], data['password'], data['server_host'])
-            await message.answer(f"✅ Сервер успешно добавлен! ID в БД: {panel_id}\n\nТеперь можно добавлять конфиги с помощью /addinbound.")
 
+    ok = False
+    if panel_test.get("api_token"):
+        res = await XUI._get_single(panel_test, "/panel/api/inbounds/list")
+        if res and res.get("success"):
+            ok = True
+    else:
+        async with XUI._new_session() as sess:
+            ok = await XUI._login(sess, panel_test)
 
-        else:
-            await message.answer("❌ Не удалось подключиться к панели с указанными данными. Сервер не добавлен.")
+    if ok:
+        panel_id = await add_panel(
+            data['name'], data['host'], data['port'], data['path'],
+            data.get('login', ""), data.get('password', ""), data['server_host'],
+            data.get('api_token', "")
+        )
+        await message.answer(f"✅ Сервер успешно добавлен! ID в БД: {panel_id}\n\nТеперь можно добавлять конфиги с помощью /addinbound.")
+    else:
+        await message.answer("❌ Не удалось подключиться к панели с указанными данными. Сервер не добавлен.")
 
     await state.clear()
 

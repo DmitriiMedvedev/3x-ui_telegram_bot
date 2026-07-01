@@ -15,7 +15,7 @@ from datetime import datetime
 
 from aiohttp import web
 
-DB_PATH      = "dobrinya.db"
+DB_PATH      = "/root/dobrinya_bot/3x-ui_telegram_bot/dobrinya.db"
 PRICE_PER_GB    = 3.0
 CREDIT_LIMIT_RUB = -50.0
 BOT_NAME     = "dobrinyaVPN_bot"

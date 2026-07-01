@@ -144,6 +144,13 @@ async def init_db():
                 created_at  TEXT    DEFAULT (datetime('now'))
             )
         """)
+        # Миграции для панелей
+        try:
+            await db.execute("ALTER TABLE panels ADD COLUMN api_token TEXT DEFAULT ''")
+            logger.info("Миграция: добавлена колонка panels.api_token")
+        except Exception:
+            pass
+
         await db.execute('''
             CREATE TABLE IF NOT EXISTS panels (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,6 +160,7 @@ async def init_db():
                 path TEXT NOT NULL,
                 login TEXT NOT NULL,
                 password TEXT NOT NULL,
+                api_token TEXT DEFAULT '',
                 server_host TEXT NOT NULL,
                 inbound_ids TEXT DEFAULT '[]',
                 billing_inbound_ids TEXT DEFAULT '[]',
@@ -440,11 +448,11 @@ async def get_all_panels() -> list[dict]:
                 panels.append(p)
             return panels
 
-async def add_panel(name: str, host: str, port: int, path: str, login: str, password: str, server_host: str) -> int:
+async def add_panel(name: str, host: str, port: int, path: str, login: str, password: str, server_host: str, api_token: str = "") -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "INSERT INTO panels (name, host, port, path, login, password, server_host) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, host, port, path, login, password, server_host)
+            "INSERT INTO panels (name, host, port, path, login, password, api_token, server_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, host, port, path, login, password, api_token, server_host)
         )
         await db.commit()
         return cursor.lastrowid

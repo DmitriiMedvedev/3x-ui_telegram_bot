@@ -66,7 +66,9 @@ class XUIClient:
         self.panels_list = panels
         for idx, panel in enumerate(panels):
             self.sessions[idx] = _new_session()
-            if await _login(self.sessions[idx], panel):
+            if panel.get("api_token"):
+                self.loggedIn.add(idx)
+            elif await _login(self.sessions[idx], panel):
                 self.loggedIn.add(idx)
         return self
 
@@ -79,9 +81,12 @@ class XUIClient:
             return None
         panel = self.panels_list[panel_idx]
         base_url = f"https://{panel['host']}:{panel['port']}"
+        headers = {}
+        if panel.get("api_token"):
+            headers["Authorization"] = f"Bearer {panel['api_token']}"
         try:
             async with self.sessions[panel_idx].post(
-                f"{base_url}{panel['path']}{endpoint}", data=payload
+                f"{base_url}{panel['path']}{endpoint}", data=payload, headers=headers
             ) as r:
                 text = await r.text()
                 if not text.strip():
@@ -98,12 +103,17 @@ class XUIClient:
 
 async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None:
     async with _new_session() as sess:
-        if not await _login(sess, panel):
-            return None
+        headers = {}
+        if panel.get("api_token"):
+            headers["Authorization"] = f"Bearer {panel['api_token']}"
+        else:
+            if not await _login(sess, panel):
+                return None
+
         base_url = f"https://{panel['host']}:{panel['port']}"
         try:
             async with sess.post(
-                f"{base_url}{panel['path']}{endpoint}", data=payload
+                f"{base_url}{panel['path']}{endpoint}", data=payload, headers=headers
             ) as r:
                 text = await r.text()
                 if not text.strip():
@@ -120,11 +130,16 @@ async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None
 
 async def _get_single(panel: dict, endpoint: str) -> dict | None:
     async with _new_session() as sess:
-        if not await _login(sess, panel):
-            return None
+        headers = {}
+        if panel.get("api_token"):
+            headers["Authorization"] = f"Bearer {panel['api_token']}"
+        else:
+            if not await _login(sess, panel):
+                return None
+
         base_url = f"https://{panel['host']}:{panel['port']}"
         try:
-            async with sess.get(f"{base_url}{panel['path']}{endpoint}") as r:
+            async with sess.get(f"{base_url}{panel['path']}{endpoint}", headers=headers) as r:
                 if r.status == 200:
                     text = await r.text()
                     try:
@@ -412,7 +427,13 @@ async def check_connection() -> bool:
     panels = await get_all_panels()
     for panel in panels:
         async with _new_session() as sess:
-            if await _login(sess, panel):
+            if panel.get("api_token"):
+                res = await _get_single(panel, "/panel/api/inbounds/list")
+                if res and res.get("success"):
+                    any_success = True
+                else:
+                    logger.error(f"Failed to connect to panel using API Token: {panel['name']}")
+            elif await _login(sess, panel):
                 any_success = True
             else:
                 logger.error(f"Failed to connect to panel: {panel['name']}")
