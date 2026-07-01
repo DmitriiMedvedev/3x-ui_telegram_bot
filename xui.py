@@ -200,26 +200,25 @@ async def add_client(email: str, expire_days: int = 0) -> dict | None:
         if expire_days > 0 else 0
     )
 
-    any_success = False
-
     panels = await get_all_panels()
+    vless_added = False
+
     for panel in panels:
-        results = []
         for iid in panel.get("inbound_ids", []):
             obj = _build_client_obj(client_uuid, email, sub_id, iid, panel, exp_ms)
             ok  = await _add_to_inbound(panel, iid, obj)
-            results.append(ok)
-        if any(results):
-            any_success = True
+            if ok: vless_added = True
 
-    if not any_success:
-        logger.error(f"add_client {email}: failed on all panels")
+    # Генерируем конфиги. Если есть хоть один конфиг (даже если только SS), считаем успехом.
+    configs = await make_configs(client_uuid, email)
+    if not configs:
+        logger.error(f"add_client {email}: failed to generate any configs")
         return None
 
     return {
         "uuid":    client_uuid,
         "sub_id":  sub_id,
-        "configs": await make_configs(client_uuid, email),
+        "configs": configs,
     }
 
 # Enables or disables a client in the 3X-UI panel.

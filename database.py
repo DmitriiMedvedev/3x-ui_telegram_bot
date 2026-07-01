@@ -13,6 +13,7 @@ database.py — Dobrinya VPN Bot v14.1.
 """
 import aiosqlite
 import logging
+import json
 from datetime import datetime
 
 DB_PATH = "dobrinya.db"
@@ -144,6 +145,7 @@ async def init_db():
                 created_at  TEXT    DEFAULT (datetime('now'))
             )
         """)
+
         # Миграции для панелей
         try:
             await db.execute("ALTER TABLE panels ADD COLUMN api_token TEXT DEFAULT ''")
@@ -432,7 +434,13 @@ async def expire_old_crypto_invoices():
         await db.commit()
 
 
-import json
+def _safe_inbounds(data_str: str) -> dict:
+    try:
+        data = json.loads(data_str)
+        if not isinstance(data, dict): return {}
+        return {int(k): v for k, v in data.items() if str(k).isdigit()}
+    except Exception:
+        return {}
 
 async def get_all_panels() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -442,9 +450,9 @@ async def get_all_panels() -> list[dict]:
             panels = []
             for r in rows:
                 p = dict(r)
-                p['inbound_ids'] = json.loads(p['inbound_ids'])
-                p['billing_inbound_ids'] = json.loads(p['billing_inbound_ids'])
-                p['inbounds'] = {int(k): v for k, v in json.loads(p['inbounds']).items()}
+                p['inbound_ids'] = json.loads(p.get('inbound_ids', '[]'))
+                p['billing_inbound_ids'] = json.loads(p.get('billing_inbound_ids', '[]'))
+                p['inbounds'] = _safe_inbounds(p.get('inbounds', '{}'))
                 panels.append(p)
             return panels
 
@@ -459,9 +467,11 @@ async def add_panel(name: str, host: str, port: int, path: str, login: str, pass
 
 async def update_panel_inbounds(panel_id: int, inbound_ids: list[int], billing_inbound_ids: list[int], inbounds: dict):
     async with aiosqlite.connect(DB_PATH) as db:
+        # Убеждаемся что ключи — строки для JSON, а не объекты None
+        clean_inbounds = {str(k): v for k, v in inbounds.items() if k is not None}
         await db.execute(
             "UPDATE panels SET inbound_ids = ?, billing_inbound_ids = ?, inbounds = ? WHERE id = ?",
-            (json.dumps(inbound_ids), json.dumps(billing_inbound_ids), json.dumps(inbounds), panel_id)
+            (json.dumps(inbound_ids), json.dumps(billing_inbound_ids), json.dumps(clean_inbounds), panel_id)
         )
         await db.commit()
 
@@ -472,8 +482,8 @@ async def get_panel(panel_id: int) -> dict | None:
             r = await cursor.fetchone()
             if r:
                 p = dict(r)
-                p['inbound_ids'] = json.loads(p['inbound_ids'])
-                p['billing_inbound_ids'] = json.loads(p['billing_inbound_ids'])
-                p['inbounds'] = {int(k): v for k, v in json.loads(p['inbounds']).items()}
+                p['inbound_ids'] = json.loads(p.get('inbound_ids', '[]'))
+                p['billing_inbound_ids'] = json.loads(p.get('billing_inbound_ids', '[]'))
+                p['inbounds'] = _safe_inbounds(p.get('inbounds', '{}'))
                 return p
             return None

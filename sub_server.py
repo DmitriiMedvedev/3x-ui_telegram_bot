@@ -31,7 +31,8 @@ def get_user_by_sub(sub_id: str) -> dict | None:
             "SELECT * FROM users WHERE sub_id=?", (sub_id,)
         ).fetchone()
         return dict(row) if row else None
-    except Exception:
+    except Exception as e:
+        print(f"Error accessing DB: {e}")
         return None
     finally:
         if conn:

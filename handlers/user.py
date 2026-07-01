@@ -1,15 +1,6 @@
 # User handlers for registration, checking stats, top-ups, and getting VPN configs.
 """
 handlers/user.py — User handlers.
-
-Изменения:
-  - /start: конфиг создаётся сразу для каждого нового пользователя,
-    sub_url отображается прямо в приветственном сообщении.
-  - Убран cb_free_bonus: его роль играет кредитный лимит −50₽.
-  - Убран trial_ok: статус определяется только через CREDIT_LIMIT_RUB.
-  - Все сообщения упоминают лимит −50₽ (≈16 ГБ бесплатно).
-  - successful_payment: конфиг всегда создаётся на /start, здесь только
-    зачисление баланса и повторный показ sub_url.
 """
 import asyncio
 import logging
@@ -68,6 +59,17 @@ async def _save_client(uid: int, result: dict, sub_type: str) -> str:
     )
     return sub_url
 
+async def _ensure_config(uid: int, user: dict) -> str:
+    """Проверяет наличие конфига и создает его, если он отсутствует."""
+    if user.get("vless_uuid") and user.get("sub_url"):
+        # Опционально: можно добавить логику обновления конфигов при добавлении новых серверов
+        return user["sub_url"]
+
+    result = await XUI.add_client(f"user_{uid}", expire_days=0)
+    if result:
+        return await _save_client(uid, result, "auto")
+    return ""
+
 
 # ── Хелпер: уведомление админов о новом пользователе ─────────────────────────
 
@@ -76,25 +78,9 @@ async def _notify_admins_new_user(
     message: Message,
     referred_by: int | None,
 ) -> None:
-    """
-    Отправляет каждому администратору:
-    1. Forward сообщения /start — Telegram рендерит его как кликабельный
-       «контакт»: тап на имя отправителя открывает профиль пользователя.
-    2. Карточку с деталями + кнопки быстрых действий (Профиль / +50₽ / Бан).
-
-    Если forward заблокирован настройками приватности пользователя,
-    inline-ссылка tg://user?id=… в карточке деталей всё равно работает.
-    """
     u   = message.from_user
     uid = u.id
-
-    # Источник регистрации
-    if referred_by:
-        source = f"👥 Реферал · от <code>{referred_by}</code>"
-    else:
-        source = "🌱 Органический"
-
-    # Username (может отсутствовать)
+    source = f"👥 Реферал · от <code>{referred_by}</code>" if referred_by else "🌱 Органический"
     username_line = f"@{u.username}" if u.username else "нет username"
 
     details = (
@@ -107,89 +93,48 @@ async def _notify_admins_new_user(
     )
 
     for admin_id in ADMIN_IDS:
-        # Шаг 1 — forward (опционально: может упасть из-за настроек приватности)
         try:
-            await bot.forward_message(
-                chat_id=admin_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id,
-            )
-        except Exception as e:
-            logger.warning(
-                f"Forward /start для admin {admin_id} не удался "
-                f"(вероятно, приватность пользователя): {e}"
-            )
-
-        # Шаг 2 — детали + кнопки (основное уведомление, должно дойти всегда)
+            await bot.forward_message(chat_id=admin_id, from_chat_id=message.chat.id, message_id=message.message_id)
+        except Exception: pass
         try:
-            await bot.send_message(
-                admin_id,
-                details,
-                parse_mode="HTML",
-                reply_markup=kb_new_user(uid),
-            )
-            logger.info(
-                f"Уведомление о новом юзере {uid} отправлено админу {admin_id}"
-            )
-        except Exception as e:
-            logger.error(
-                f"Не удалось отправить карточку нового юзера {uid} "
-                f"админу {admin_id}: {e}"
-            )
+            await bot.send_message(admin_id, details, parse_mode="HTML", reply_markup=kb_new_user(uid))
+        except Exception: pass
 
 
 # ── /start ─────────────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
-# Command /start handler: registers user and automatically provisions a VPN config.
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     uid = message.from_user.id
 
-    # Парсим реферальный код
     referred_by = None
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("ref_"):
         try:
             rid = int(args[1][4:])
-            if rid != uid:
-                referred_by = rid
-        except ValueError:
-            pass
+            if rid != uid: referred_by = rid
+        except ValueError: pass
 
     user, is_new = await get_or_create_user(
-        uid,
-        message.from_user.username  or "",
-        message.from_user.full_name or "",
-        referred_by=referred_by,
+        uid, message.from_user.username or "", message.from_user.full_name or "", referred_by=referred_by
     )
 
-    # Реферальное уведомление — только при реальной регистрации
     if is_new and referred_by:
         try:
             await bot.send_message(
                 referred_by,
                 f"👥 По твоей ссылке зарегистрировался новый пользователь!\n"
-                f"Ты получишь <b>{int(REFERRAL_PERCENT * 100)}%</b> "
-                f"с его пополнений.",
+                f"Ты получишь <b>{int(REFERRAL_PERCENT * 100)}%</b> с его пополнений.",
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
+        except Exception: pass
 
-    # ── Создаём конфиг сразу для каждого нового пользователя ─────────────────
-    sub_url = user.get("sub_url", "")
-    if not user.get("vless_uuid"):
-        result = await XUI.add_client(f"user_{uid}", expire_days=0)
-        if result:
-            sub_url = await _save_client(uid, result, "auto")
-            logger.info(f"cmd_start: конфиг создан для нового пользователя {uid}")
-        else:
-            logger.error(f"cmd_start: не удалось создать конфиг для {uid}")
-
-    # ── Уведомление администратора о новом пользователе ──────────────────────
     if is_new:
         await _notify_admins_new_user(bot, message, referred_by)
+
+    # ── Проверяем/создаем конфиг ──────────────────────────────────────────────
+    sub_url = await _ensure_config(uid, user)
 
     # ── Приветственное сообщение ──────────────────────────────────────────────
     bal = user["balance"]
@@ -197,7 +142,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         f"\n🔗 <b>Твоя подписка:</b>\n<code>{sub_url}</code>\n\n"
         f"📱 v2rayTUN / Hiddify / v2rayN → + → Добавить подписку\n"
         if sub_url else
-        "\n⏳ Конфиг создаётся, попробуй через несколько секунд.\n"
+        "\n⏳ Конфиг создаётся, попробуй нажать /start ещё раз через пару секунд.\n"
     )
     await message.answer(
         f"👋 Привет, <b>{message.from_user.first_name}</b>!\n\n"
@@ -246,24 +191,22 @@ async def _show_account(uid: int, message: Message, edit: bool):
         await fn("Нажми /start для регистрации.", reply_markup=kb_back())
         return
 
+    # Убеждаемся, что конфиг есть (на случай если пользователь старый, а сервера новые)
+    sub_url = await _ensure_config(uid, user)
+    if sub_url:
+        user = await get_user(uid) # Обновляем данные пользователя после создания конфига
+
     bal   = user["balance"]
     total = user.get("total_traffic_bytes") or 0
 
-    # Статус на основе кредитного лимита
     if bal > CREDIT_LIMIT_RUB:
         if bal >= 0:
             status = f"✅ Активен (~{bal / PRICE_PER_GB:.1f} ГБ)"
         else:
-            # В кредите: показываем сколько осталось до отключения
             till_off = bal - CREDIT_LIMIT_RUB
-            status   = (
-                f"✅ Активен · кредит {bal:.2f} ₽ "
-                f"(ещё ~{till_off / PRICE_PER_GB:.1f} ГБ до откл.)"
-            )
+            status   = f"✅ Активен · кредит {bal:.2f} ₽ (ещё ~{till_off / PRICE_PER_GB:.1f} ГБ до откл.)"
     else:
         status = f"❌ Отключён (баланс ≤ −{_CREDIT_ABS:.0f} ₽)"
-
-    sub_url = user.get("sub_url", "")
 
     b = InlineKeyboardBuilder()
     b.button(text="📋 Все конфиги",      callback_data="show_configs")
@@ -312,9 +255,7 @@ async def cb_show_configs(callback: CallbackQuery):
             icon = "🔗 VPN"
         lines.append(f"<b>{icon}:</b>\n<code>{link}</code>\n")
 
-    await callback.message.edit_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=kb_back()
-    )
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=kb_back())
     await callback.answer()
 
 
@@ -336,7 +277,7 @@ async def cb_traffic_stats(callback: CallbackQuery):
         up, down   = 0, total_live
 
     bal      = user["balance"]
-    till_off = bal - CREDIT_LIMIT_RUB   # сколько ₽ осталось до отключения
+    till_off = bal - CREDIT_LIMIT_RUB
 
     await callback.message.edit_text(
         f"📊 <b>Статистика трафика</b>\n\n"
@@ -345,8 +286,7 @@ async def cb_traffic_stats(callback: CallbackQuery):
         f"📦 Итого:      <b>{fmt_bytes(total_live)}</b>\n\n"
         f"💰 Баланс: <b>{bal:.2f} ₽</b>\n"
         f"Тариф: <b>{PRICE_PER_GB} ₽/ГБ</b>\n"
-        f"До отключения: <b>{till_off:.2f} ₽</b> "
-        f"(~{till_off / PRICE_PER_GB:.1f} ГБ)\n\n"
+        f"До отключения: <b>{till_off:.2f} ₽</b> (~{till_off / PRICE_PER_GB:.1f} ГБ)\n\n"
         f"⚠️ Отключение при <b>−{_CREDIT_ABS:.0f} ₽</b>",
         parse_mode="HTML",
         reply_markup=kb_back(),
@@ -397,31 +337,22 @@ async def cb_pay_stars(callback: CallbackQuery, bot: Bot):
 
 
 @router.callback_query(F.data.startswith("pay_crypto_"))
-# Creates a CryptoBot invoice and sends the payment link to the user.
 async def cb_pay_crypto(callback: CallbackQuery):
-    """Создаёт счёт CryptoBot и отправляет пользователю ссылку для оплаты."""
     rub = int(callback.data.split("_")[-1])
     uid = callback.from_user.id
-
-    await callback.message.edit_text(
-        "₿ <b>Создаю счёт...</b>", parse_mode="HTML"
-    )
-
+    await callback.message.edit_text("₿ <b>Создаю счёт...</b>", parse_mode="HTML")
     payload = f"topup_{uid}_{rub}"
     invoice = await CryptoBot.create_invoice(rub, payload)
 
     if not invoice:
         await callback.message.edit_text(
-            "❌ <b>Не удалось создать счёт CryptoBot.</b>\n\n"
-            "Попробуй позже или выбери другой способ оплаты.",
-            parse_mode="HTML",
-            reply_markup=kb_topup_method(rub),
+            "❌ <b>Не удалось создать счёт CryptoBot.</b>\n\nПопробуй позже или выбери другой способ оплаты.",
+            parse_mode="HTML", reply_markup=kb_topup_method(rub),
         )
         await callback.answer()
         return
 
     await save_crypto_invoice(invoice["invoice_id"], uid, float(rub))
-
     b = InlineKeyboardBuilder()
     b.button(text=f"💸 Оплатить {rub} ₽", url=invoice["pay_url"])
     b.button(text="◀️ Назад", callback_data="topup_start")
@@ -431,11 +362,9 @@ async def cb_pay_crypto(callback: CallbackQuery):
         f"₿ <b>Оплата через CryptoBot</b>\n\n"
         f"Сумма: <b>{rub} ₽</b> (~{rub / PRICE_PER_GB:.0f} ГБ)\n\n"
         f"Нажми кнопку ниже — откроется @CryptoBot с уже выставленным счётом.\n"
-        f"Можно оплатить в USDT, TON, BTC, ETH и других криптовалютах.\n\n"
         f"⏳ Баланс пополнится автоматически в течение 30 секунд после оплаты.\n"
         f"🕐 Счёт действует <b>1 час</b>.",
-        parse_mode="HTML",
-        reply_markup=b.as_markup(),
+        parse_mode="HTML", reply_markup=b.as_markup(),
     )
     await callback.answer()
 
@@ -446,51 +375,32 @@ async def pre_checkout(query: PreCheckoutQuery):
 
 
 @router.message(F.successful_payment)
-# Handles successful payment via Telegram Stars.
 async def successful_payment(message: Message, bot: Bot):
     uid = message.from_user.id
     rub = int(message.successful_payment.invoice_payload.split("_")[1])
 
     await add_balance(uid, rub)
     await add_transaction(uid, rub, "stars", f"Telegram Stars {rub} ₽")
-    # Сбрасываем флаг предупреждения — при следующем дипе ниже −30₽
-    # пользователь получит уведомление снова
     await update_user(uid, notified_low_balance=0)
 
-    # Реферальное вознаграждение
     user = await get_user(uid)
     if user and (referrer_id := user.get("referred_by")):
         reward = round(rub * REFERRAL_PERCENT, 2)
         await add_balance(referrer_id, reward)
-        await add_transaction(referrer_id, reward, "referral",
-                              f"Реферал {uid}: {reward:.2f} ₽")
+        await add_transaction(referrer_id, reward, "referral", f"Реферал {uid}: {reward:.2f} ₽")
         await add_referral_reward(referrer_id, uid, reward)
         try:
-            await bot.send_message(
-                referrer_id,
-                f"🎉 Реферальный бонус <b>+{reward:.2f} ₽</b>!",
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
+            await bot.send_message(referrer_id, f"🎉 Реферальный бонус <b>+{reward:.2f} ₽</b>!", parse_mode="HTML")
+        except Exception: pass
 
-    # Конфиг создаётся при /start. Если по какой-то причине его нет — создаём.
-    sub_url = user.get("sub_url", "") if user else ""
-    if user and not user.get("vless_uuid"):
-        result = await XUI.add_client(f"user_{uid}", expire_days=0)
-        if result:
-            sub_url = await _save_client(uid, result, "auto")
-
+    sub_url = await _ensure_config(uid, user)
     fresh_bal = (await get_user(uid) or {}).get("balance", rub)
     await message.answer(
-        f"✅ <b>Баланс пополнен на {rub} ₽</b> "
-        f"(~{rub / PRICE_PER_GB:.0f} ГБ)\n\n"
+        f"✅ <b>Баланс пополнин на {rub} ₽</b> (~{rub / PRICE_PER_GB:.0f} ГБ)\n\n"
         f"💰 Текущий баланс: <b>{fresh_bal:.2f} ₽</b>\n\n"
         + (f"🔗 <b>Подписка:</b>\n<code>{sub_url}</code>" if sub_url else ""),
-        parse_mode="HTML",
-        reply_markup=kb_main(),
+        parse_mode="HTML", reply_markup=kb_main(),
     )
-
     asyncio.create_task(billing_tick(bot))
 
 
@@ -499,11 +409,7 @@ async def successful_payment(message: Message, bot: Bot):
 @router.callback_query(F.data == "promo_start")
 async def cb_promo_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.waiting_promo)
-    await callback.message.edit_text(
-        "🎁 <b>Промокод</b>\n\nВведи промокод:",
-        parse_mode="HTML",
-        reply_markup=kb_back(),
-    )
+    await callback.message.edit_text("🎁 <b>Промокод</b>\n\nВведи промокод:", parse_mode="HTML", reply_markup=kb_back())
     await callback.answer()
 
 
@@ -521,22 +427,18 @@ async def handle_promo(message: Message, state: FSMContext):
         await message.answer("❌ Промокод уже исчерпан.", reply_markup=kb_back())
         return
     if await promo_already_used(uid, promo["id"]):
-        await message.answer("❌ Ты уже использовал этот промокод.",
-                             reply_markup=kb_back())
+        await message.answer("❌ Ты уже использовал этот промокод.", reply_markup=kb_back())
         return
 
     bonus = promo["bonus_rub"]
     await add_balance(uid, bonus)
     await add_transaction(uid, bonus, "promo", f"Промокод {code}")
     await use_promo(uid, promo["id"])
-    # Сбрасываем флаг предупреждения
     await update_user(uid, notified_low_balance=0)
     await message.answer(
         f"✅ Промокод <b>{code}</b> применён!\n"
-        f"Начислено: <b>+{bonus:.0f} ₽</b> "
-        f"(~{bonus / PRICE_PER_GB:.0f} ГБ)",
-        parse_mode="HTML",
-        reply_markup=kb_back(),
+        f"Начислено: <b>+{bonus:.0f} ₽</b> (~{bonus / PRICE_PER_GB:.0f} ГБ)",
+        parse_mode="HTML", reply_markup=kb_back(),
     )
 
 
@@ -549,13 +451,11 @@ async def cb_referral_info(callback: CallbackQuery):
     link  = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
     await callback.message.edit_text(
         f"👥 <b>Реферальная программа</b>\n\n"
-        f"Ты получаешь <b>{int(REFERRAL_PERCENT * 100)}%</b> "
-        f"с каждого пополнения реферала.\n\n"
+        f"Ты получаешь <b>{int(REFERRAL_PERCENT * 100)}%</b> с каждого пополнения реферала.\n\n"
         f"📊 Рефералов: <b>{stats['count']}</b>\n"
         f"💰 Заработано: <b>{stats['earned']:.2f} ₽</b>\n\n"
         f"🔗 Твоя реферальная ссылка:\n<code>{link}</code>",
-        parse_mode="HTML",
-        reply_markup=kb_back(),
+        parse_mode="HTML", reply_markup=kb_back(),
     )
     await callback.answer()
 
@@ -568,11 +468,7 @@ async def cb_support(callback: CallbackQuery):
     b.button(text=f"💬 @{ADMIN_USERNAME}", url=f"https://t.me/{ADMIN_USERNAME}")
     b.button(text="◀️ В меню", callback_data="back_main")
     b.adjust(1)
-    await callback.message.edit_text(
-        "🆘 <b>Поддержка</b>\n\nПиши в личку:",
-        parse_mode="HTML",
-        reply_markup=b.as_markup(),
-    )
+    await callback.message.edit_text("🆘 <b>Поддержка</b>\n\nПиши в личку:", parse_mode="HTML", reply_markup=b.as_markup())
     await callback.answer()
 
 
@@ -597,7 +493,6 @@ async def cb_about(callback: CallbackQuery):
         f"Отключение при балансе <b>−{_CREDIT_ABS:.0f} ₽</b>.\n\n"
         f"📱 Совместимые клиенты:\n"
         f"v2rayTUN, Hiddify, NekoBox, v2rayN, Streisand",
-        parse_mode="HTML",
-        reply_markup=kb_back(),
+        parse_mode="HTML", reply_markup=kb_back(),
     )
     await callback.answer()
