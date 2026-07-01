@@ -5,6 +5,7 @@ handlers/admin.py — Admin panel v16.7 (Robust Inbound Parsing + Fully Function
 import asyncio
 import logging
 import random
+import html
 import string
 import json
 from datetime import datetime
@@ -103,7 +104,7 @@ async def cmd_status(message: Message):
 
             icon = "✅" if ok else "❌"
             ibs = p.get("inbounds") or {}
-            text += f"{icon} <b>{p['name']}</b> ({p['host']})\n   Inbounds: {len(ibs)}\n   API: {'Token' if p.get('api_token') else 'Login'}\n\n"
+            text += f"{icon} <b>{html.escape(p['name'])}</b> ({html.escape(p['host'])})\n   Inbounds: {len(ibs)}\n   API: {'Token' if p.get('api_token') else 'Login'}\n\n"
 
     await message.answer(text, parse_mode="HTML")
 
@@ -131,7 +132,7 @@ async def panel_cfg(callback: CallbackQuery):
     pid = int(callback.data.split("_")[-1])
     p = await get_panel(pid)
     if not p: return
-    text = f"⚙️ <b>Сервер: {p['name']}</b>\nIP: <code>{p['host']}</code>\n\n<b>Конфиги в базе:</b>\n"
+    text = f"⚙️ <b>Сервер: {html.escape(p['name'])}</b>\nIP: <code>{html.escape(p['host'])}</code>\n\n<b>Конфиги в базе:</b>\n"
     b = InlineKeyboardBuilder()
     ibs = p.get('inbounds', {})
     if not ibs: text += "— нет данных —"
@@ -411,7 +412,7 @@ async def process_inbound_json(message: Message, state: FSMContext):
         if iid not in bib_ids: bib_ids.append(iid)
 
         await update_panel_inbounds(panel['id'], ib_ids, bib_ids, inbounds)
-        await message.answer(f"✅ Конфиг {iid} ({prot}) успешно добавлен на {panel['name']}.")
+        await message.answer(f"✅ Конфиг {html.escape(str(iid))} ({html.escape(str(prot))}) успешно добавлен на {html.escape(panel['name'])}.")
     except Exception as e: await message.answer(f"❌ Ошибка парсинга: {e}")
     await state.clear()
 
@@ -475,7 +476,7 @@ async def cmd_userinfo(message: Message):
     traffic = await XUI.get_client_traffic(f"user_{uid}")
     status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
     sub_url = XUI.make_sub_url(u['sub_id'])
-    text = f"👤 {u['full_name']} (@{u['username']})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
+    text = f"👤 {html.escape(u['full_name'])} (@{html.escape(u['username'])})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
     if traffic: text += f"\nТрафик (панель): {fmt_bytes(traffic['total'])}"
     text += f"\n🔗 Подписка: <code>{sub_url}</code>"
     await message.answer(text, parse_mode="HTML")
@@ -503,7 +504,7 @@ async def cmd_reply(message: Message, bot: Bot):
     if not is_admin(message.from_user.id): return
     parts = message.text.split(maxsplit=2)
     if len(parts) < 3: return
-    await bot.send_message(int(parts[1]), f"📩 <b>Ответ поддержки:</b>\n\n{parts[2]}", parse_mode="HTML")
+    await bot.send_message(int(parts[1]), f"📩 <b>Ответ поддержки:</b>\n\n{html.escape(parts[2])}", parse_mode="HTML")
     await message.answer("✅")
 
 @router.message(Command("broadcast"))
@@ -513,7 +514,7 @@ async def cmd_broadcast(message: Message, bot: Bot):
     if not text: return
     users = await get_all_users()
     for u in users:
-        try: await bot.send_message(u["tg_id"], f"📢 {text}"); await asyncio.sleep(0.05)
+        try: await bot.send_message(u["tg_id"], f"📢 {html.escape(text)}", parse_mode="HTML"); await asyncio.sleep(0.05)
         except: pass
     await message.answer("✅")
 
@@ -535,7 +536,7 @@ async def adm_users(callback: CallbackQuery):
     lines = [f"👥 <b>Пользователи ({len(users)}):</b>\n"]
     for u in users[:40]:
         status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
-        lines.append(f"{status} <code>{u['tg_id']}</code> {u.get('full_name')[:18]}\n   {u['balance']:.1f}₽ | {fmt_bytes(u.get('total_traffic_bytes') or 0)}")
+        lines.append(f"{status} <code>{u['tg_id']}</code> {html.escape(u.get('full_name')[:18])}\n   {u['balance']:.1f}₽ | {fmt_bytes(u.get('total_traffic_bytes') or 0)}")
     b = InlineKeyboardBuilder()
     b.button(text="◀️ Назад", callback_data="adm_back")
     await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=b.as_markup())
@@ -580,7 +581,7 @@ async def cb_adm_userinfo_btn(callback: CallbackQuery):
     u = await get_user(uid)
     if not u: return await callback.answer("Не найден")
     status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
-    text = f"👤 {u['full_name']}\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽"
+    text = f"👤 {html.escape(u['full_name'])}\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽"
     b = InlineKeyboardBuilder(); b.button(text="💳 +50 ₽", callback_data=f"adm_gift_{uid}"); b.button(text="🚫 Бан", callback_data=f"adm_ban_{uid}"); b.button(text="◀️ Назад", callback_data=f"adm_card_{uid}"); b.adjust(2, 1)
     await callback.message.edit_text(text, reply_markup=b.as_markup()); await callback.answer()
 

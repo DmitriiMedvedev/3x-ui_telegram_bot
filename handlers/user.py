@@ -4,6 +4,7 @@ handlers/user.py — User handlers.
 """
 import asyncio
 import logging
+import html
 from datetime import datetime
 from math import ceil
 
@@ -83,7 +84,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     bal = user["balance"]
 
     await message.answer(
-        f"👋 Привет, <b>{message.from_user.first_name}</b>!\n\n"
+        f"👋 Привет, <b>{html.escape(message.from_user.first_name)}</b>!\n\n"
         f"🛡 <b>Dobrinya VPN</b>\n"
         f"Тариф: <b>{PRICE_PER_GB} ₽/ГБ</b>\n"
         f"Кредит: <b>~{_CREDIT_GB:.0f} ГБ</b> бесплатно\n\n"
