@@ -338,9 +338,11 @@ async def cmd_userinfo(message: Message):
     if not u: return await message.answer("Не найден")
     traffic = await XUI.get_client_traffic(f"user_{uid}")
     status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
+    sub_url = XUI.make_sub_url(u['sub_id'])
     text = f"👤 {u['full_name']} (@{u['username']})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
     if traffic: text += f"\nТрафик (панель): {fmt_bytes(traffic['total'])}"
-    await message.answer(text)
+    text += f"\n🔗 Подписка: <code>{sub_url}</code>"
+    await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("ban"))
 async def cmd_ban(message: Message):
