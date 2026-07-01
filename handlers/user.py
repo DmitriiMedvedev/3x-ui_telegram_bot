@@ -26,7 +26,7 @@ from database import (
 )
 import cryptobot as CryptoBot
 import xui as XUI
-from keyboards import kb_main, kb_back, kb_topup_amount, kb_topup_method, kb_new_user
+from keyboards import kb_main, kb_back, kb_topup_method, kb_new_user
 from billing import billing_tick, fmt_bytes
 
 router = Router()
@@ -37,6 +37,7 @@ _CREDIT_GB  = _CREDIT_ABS / PRICE_PER_GB
 
 class UserStates(StatesGroup):
     waiting_promo = State()
+    waiting_topup_amount = State()
 
 async def _ensure_user_on_panels(u: dict):
     """Фоновое добавление пользователя на все панели 3X-UI."""
@@ -154,15 +155,23 @@ async def cb_traffic_stats(callback: CallbackQuery):
 
 # ── Пополнение (STARS / CRYPTO) ──
 @router.callback_query(F.data == "topup_start")
-async def cb_topup_start(callback: CallbackQuery):
-    await callback.message.edit_text(f"💳 <b>Пополнение баланса</b>\n\nВыбери сумму:", parse_mode="HTML", reply_markup=kb_topup_amount())
+async def cb_topup_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(UserStates.waiting_topup_amount)
+    await callback.message.edit_text(f"💳 <b>Пополнение баланса</b>\n\nВведите сумму пополнения в рублях (например, 150):", parse_mode="HTML", reply_markup=kb_back())
     await callback.answer()
 
-@router.callback_query(F.data.startswith("topup_amount_"))
-async def cb_topup_amount(callback: CallbackQuery):
-    rub = int(callback.data.split("_")[-1])
-    await callback.message.edit_text(f"💳 <b>Пополнение: {rub} ₽</b>\n\nСпособ оплаты:", parse_mode="HTML", reply_markup=kb_topup_method(rub))
-    await callback.answer()
+@router.message(UserStates.waiting_topup_amount, F.text)
+async def handle_topup_amount(message: Message, state: FSMContext):
+    try:
+        rub = int(message.text.strip())
+        if rub <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректную сумму в рублях (целое число больше 0):", reply_markup=kb_back())
+        return
+
+    await state.clear()
+    await message.answer(f"💳 <b>Пополнение: {rub} ₽</b>\n\nСпособ оплаты:", parse_mode="HTML", reply_markup=kb_topup_method(rub))
 
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def cb_pay_stars(callback: CallbackQuery, bot: Bot):
@@ -239,3 +248,7 @@ async def cb_support(callback: CallbackQuery):
 async def cb_about(callback: CallbackQuery):
     await callback.message.edit_text(f"❓ <b>О сервисе</b>\n\n🛡 <b>Dobrinya VPN</b>\n💰 Тариф: <b>{PRICE_PER_GB} ₽/ГБ</b>\n📱 Поддерживает: VLESS, Shadowsocks", parse_mode="HTML", reply_markup=kb_back())
     await callback.answer()
+
+@router.message(UserStates.waiting_topup_amount)
+async def handle_topup_amount_invalid(message: Message):
+    await message.answer("❌ Пожалуйста, отправьте сумму текстом (число).", reply_markup=kb_back())

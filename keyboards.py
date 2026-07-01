@@ -23,16 +23,6 @@ def kb_back() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def kb_topup_amount() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    for rub in [30, 50, 100, 200, 500]:
-        gb = rub / PRICE_PER_GB
-        b.button(text=f"{rub} ₽ (~{gb:.0f} ГБ)", callback_data=f"topup_amount_{rub}")
-    b.button(text="◀️ Назад", callback_data="back_main")
-    b.adjust(2, 2, 1, 1)
-    return b.as_markup()
-
-
 def kb_topup_method(rub: int) -> InlineKeyboardMarkup:
     from math import ceil
     from config import STARS_RUB_NET, CRYPTOBOT_TOKEN
