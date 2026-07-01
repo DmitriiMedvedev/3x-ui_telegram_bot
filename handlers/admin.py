@@ -1,6 +1,6 @@
 # Admin panel handlers for managing users, adding balances, banning, and checking stats.
 """
-handlers/admin.py — Admin panel v16.3 (Ultimate Robust Inbound Parsing).
+handlers/admin.py — Admin panel v16.6 (Robust Inbound Parsing + All Commands).
 """
 import asyncio
 import logging
@@ -65,6 +65,7 @@ async def cmd_admin(message: Message):
         f"/ban ID | /unban ID\n"
         f"/billing — принудительное списание\n"
         f"/debugtraffic — диагностика\n"
+        f"/userinfo ID — инфо о юзере\n"
         f"/sync — синхронизировать всех юзеров",
         parse_mode="HTML", reply_markup=kb_admin(),
     )
@@ -78,7 +79,6 @@ async def cmd_sync(message: Message):
     count = 0
     for u in users:
         if u.get("vless_uuid") and u.get("sub_id"):
-            # Добавляем на все инбаунды всех панелей
             await XUI.add_client_background(f"user_{u['tg_id']}", u['vless_uuid'], u['sub_id'])
             count += 1
             if count % 10 == 0: await asyncio.sleep(0.2)
@@ -135,7 +135,6 @@ async def pdel_ib(callback: CallbackQuery):
     if not p: return
     ibs = p.get('inbounds', {})
     if iid in ibs: del ibs[iid]
-    # Обновляем списки
     ib_ids = [str(x) for x in p.get('inbound_ids', []) if str(x) != iid]
     bib_ids = [str(x) for x in p.get('billing_inbound_ids', []) if str(x) != iid]
     await update_panel_inbounds(pid, ib_ids, bib_ids, ibs)
@@ -253,7 +252,6 @@ async def process_panel_selection(callback: CallbackQuery, state: FSMContext):
 async def process_inbound_json(message: Message, state: FSMContext):
     try:
         raw = json.loads(message.text)
-        # Обработка разных форматов 3X-UI (обертка obj или массив)
         if isinstance(raw, list) and len(raw) > 0: inbound = raw[0]
         elif isinstance(raw, dict) and isinstance(raw.get("obj"), dict): inbound = raw["obj"]
         else: inbound = raw
@@ -263,7 +261,7 @@ async def process_inbound_json(message: Message, state: FSMContext):
         if prot == "shadowsocks": prot = "ss"
 
         if not iid or not prot:
-            await message.answer("❌ Ошибка: В JSON не найден ID или протокол. Убедись, что это Export из Inbounds.")
+            await message.answer("❌ Ошибка: В JSON не найден ID или протокол.")
             return
 
         stream = inbound.get("streamSettings", {})
@@ -272,7 +270,17 @@ async def process_inbound_json(message: Message, state: FSMContext):
             "protocol": prot, "port": inbound.get("port"),
             "network": stream.get("network", "tcp"), "security": stream.get("security", "none")
         }
-        # Раскрываем настройки Reality/TLS
+        net = cfg["network"]
+        if net == "xhttp":
+            xs = stream.get("xhttpSettings", {})
+            cfg.update({"path": xs.get("path", "/"), "xhttp_mode": xs.get("mode", "auto"), "ws_host": xs.get("host", "")})
+        elif net == "ws":
+            ws = stream.get("wsSettings", {})
+            cfg.update({"path": ws.get("path", "/"), "ws_host": ws.get("headers", {}).get("Host", "")})
+        elif net == "grpc":
+            gs = stream.get("grpcSettings", {})
+            cfg.update({"grpc_service": gs.get("serviceName", "")})
+
         if cfg["security"] == "reality":
             rs = stream.get("realitySettings", {})
             cfg.update({"public_key": rs.get("settings", {}).get("publicKey", ""), "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"), "sni": rs.get("serverNames", [""])[0], "short_id": rs.get("shortIds", [""])[0]})
@@ -294,6 +302,86 @@ async def process_inbound_json(message: Message, state: FSMContext):
         await message.answer(f"✅ Конфиг {iid} ({prot}) успешно добавлен на {panel['name']}.")
     except Exception as e: await message.answer(f"❌ Ошибка парсинга: {e}")
     await state.clear()
+
+# ── Стандартные команды управления ──
+
+@router.message(Command("billing"))
+async def cmd_billing(message: Message, bot: Bot):
+    if not is_admin(message.from_user.id): return
+    await message.answer("⏳ Billing tick...")
+    await billing_tick(bot)
+    await message.answer("✅ Готово.")
+
+@router.message(Command("setbalance"))
+async def cmd_setbalance(message: Message, bot: Bot):
+    if not is_admin(message.from_user.id): return
+    parts = message.text.split()
+    if len(parts) != 3: return await message.answer("Формат: /setbalance ID СУММА")
+    uid, amt = int(parts[1]), float(parts[2])
+    await add_balance(uid, amt)
+    await add_transaction(uid, amt, "admin", f"Админ: {amt:+.2f} ₽")
+    await message.answer(f"✅ Баланс {uid} изменён на {amt:+.2f} ₽")
+    asyncio.create_task(billing_tick(bot))
+
+@router.message(Command("userinfo"))
+async def cmd_userinfo(message: Message):
+    if not is_admin(message.from_user.id): return
+    parts = message.text.split()
+    if len(parts) != 2: return await message.answer("Формат: /userinfo ID")
+    uid = int(parts[1])
+    u = await get_user(uid)
+    if not u: return await message.answer("Не найден")
+    traffic = await XUI.get_client_traffic(f"user_{uid}")
+    status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
+    text = f"👤 {u['full_name']} (@{u['username']})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
+    if traffic: text += f"\nТрафик (панель): {fmt_bytes(traffic['total'])}"
+    await message.answer(text)
+
+@router.message(Command("ban"))
+async def cmd_ban(message: Message):
+    if not is_admin(message.from_user.id): return
+    uid = int(message.text.split()[1])
+    u = await get_user(uid)
+    await update_user(uid, is_banned=1, xui_enabled=0)
+    if u and u.get("vless_uuid"): await XUI.toggle_client(f"user_{uid}", u["vless_uuid"], False, u.get("sub_id", ""))
+    await message.answer("🚫 Забанен")
+
+@router.message(Command("unban"))
+async def cmd_unban(message: Message):
+    if not is_admin(message.from_user.id): return
+    uid = int(message.text.split()[1])
+    u = await get_user(uid)
+    await update_user(uid, is_banned=0, xui_enabled=1)
+    if u and u.get("vless_uuid"): await XUI.toggle_client(f"user_{uid}", u["vless_uuid"], True, u.get("sub_id", ""))
+    await message.answer("✅ Разбанен")
+
+@router.message(Command("reply"))
+async def cmd_reply(message: Message, bot: Bot):
+    if not is_admin(message.from_user.id): return
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3: return
+    await bot.send_message(int(parts[1]), f"📩 <b>Ответ поддержки:</b>\n\n{parts[2]}", parse_mode="HTML")
+    await message.answer("✅")
+
+@router.message(Command("broadcast"))
+async def cmd_broadcast(message: Message, bot: Bot):
+    if not is_admin(message.from_user.id): return
+    text = message.text.replace("/broadcast", "").strip()
+    if not text: return
+    users = await get_all_users()
+    for u in users:
+        try: await bot.send_message(u["tg_id"], f"📢 {text}"); await asyncio.sleep(0.05)
+        except: pass
+    await message.answer("✅")
+
+@router.message(Command("addpromo"))
+async def cmd_addpromo(message: Message):
+    if not is_admin(message.from_user.id): return
+    p = message.text.split()
+    if len(p) != 4: return await message.answer("Формат: /addpromo КОД РУБ USES")
+    code = p[1].upper() if p[1] != "_" else "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    await create_promo(code, float(p[2]), int(p[3]), message.from_user.id)
+    await message.answer(f"✅ Промокод {code} на {p[2]}₽ создан.")
 
 @router.callback_query(F.data == "adm_back")
 async def adm_back(callback: CallbackQuery):

@@ -71,7 +71,9 @@ def make_link(u_uuid, email, panel, cfg, iid):
                 params.update({"pbk": cfg.get("public_key", ""), "fp": cfg.get("fingerprint", "chrome"), "sni": cfg.get("sni", ""), "sid": cfg.get("short_id", "")})
                 if cfg.get("flow"): params["flow"] = cfg["flow"]
             elif sec == "tls": params["sni"] = cfg.get("sni", "")
-            if net == "xhttp": params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
+            if net == "xhttp":
+                params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
+                if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
             elif net == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
             elif net == "ws":
                 params["path"] = cfg.get("path", "/")
