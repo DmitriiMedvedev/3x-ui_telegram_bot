@@ -1,6 +1,6 @@
 # Admin panel handlers for managing users, adding balances, banning, and checking stats.
 """
-handlers/admin.py — Admin panel v16.6 (Robust Inbound Parsing + All Commands).
+handlers/admin.py — Admin panel v16.7 (Robust Inbound Parsing + Fully Functional UI).
 """
 import asyncio
 import logging
@@ -151,13 +151,18 @@ async def cmd_addserver(message: Message, state: FSMContext):
 
 @router.message(AddServerStates.waiting_name)
 async def process_server_name(message: Message, state: FSMContext):
+    if message.text.startswith('/'):
+        return await message.answer("Название не может начинаться с /. Введи название сервера:")
     await state.update_data(name=message.text)
     await state.set_state(AddServerStates.waiting_host)
     await message.answer("IP или домен для API:")
 
 @router.message(AddServerStates.waiting_host)
 async def process_server_host(message: Message, state: FSMContext):
-    await state.update_data(host=message.text)
+    host = message.text.strip().lower()
+    if host.startswith('http'):
+        host = host.split('//')[-1].split('/')[0].split(':')[0]
+    await state.update_data(host=host)
     await state.set_state(AddServerStates.waiting_port)
     await message.answer("Порт панели:")
 
@@ -256,12 +261,12 @@ async def process_inbound_json(message: Message, state: FSMContext):
         elif isinstance(raw, dict) and isinstance(raw.get("obj"), dict): inbound = raw["obj"]
         else: inbound = raw
 
-        iid = inbound.get("id")
+        iid = inbound.get("id") or inbound.get("tag")
         prot = str(inbound.get("protocol", "")).lower()
         if prot == "shadowsocks": prot = "ss"
 
-        if not iid or not prot:
-            await message.answer("❌ Ошибка: В JSON не найден ID или протокол.")
+        if iid is None or not prot:
+            await message.answer("❌ Ошибка: В JSON не найден ID/Tag или протокол.")
             return
 
         stream = inbound.get("streamSettings", {})
@@ -383,6 +388,42 @@ async def cmd_addpromo(message: Message):
     await create_promo(code, float(p[2]), int(p[3]), message.from_user.id)
     await message.answer(f"✅ Промокод {code} на {p[2]}₽ создан.")
 
+# ── Callback Handlers (Keyboard buttons) ──
+
+@router.callback_query(F.data == "adm_users")
+async def adm_users(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    users = await get_all_users()
+    lines = [f"👥 <b>Пользователи ({len(users)}):</b>\n"]
+    for u in users[:40]:
+        status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
+        lines.append(f"{status} <code>{u['tg_id']}</code> {u.get('full_name')[:18]}\n   {u['balance']:.1f}₽ | {fmt_bytes(u.get('total_traffic_bytes') or 0)}")
+    b = InlineKeyboardBuilder()
+    b.button(text="◀️ Назад", callback_data="adm_back")
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=b.as_markup())
+    await callback.answer()
+
+@router.callback_query(F.data == "adm_revenue")
+async def adm_revenue(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    s = await get_revenue_stats()
+    profit = (s.get("month") or 0) - SERVER_COST_RUB
+    b = InlineKeyboardBuilder()
+    b.button(text="◀️ Назад", callback_data="adm_back")
+    await callback.message.edit_text(f"📊 <b>Финансы</b>\n\nСегодня: {s.get('today'):.2f}₽\nМесяц: {s.get('month'):.2f}₽\nВсего: {s.get('total'):.2f}₽\nПрибыль: {profit:+.2f}₽", parse_mode="HTML", reply_markup=b.as_markup())
+    await callback.answer()
+
+@router.callback_query(F.data == "adm_promos")
+async def adm_promos(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    promos = await get_all_promos()
+    b = InlineKeyboardBuilder(); b.button(text="◀️ Назад", callback_data="adm_back"); b.adjust(1)
+    if not promos: return await callback.message.edit_text("🎁 Промокодов нет.", reply_markup=b.as_markup())
+    lines = ["🎁 <b>Промокоды:</b>\n"]
+    for p in promos: lines.append(f"<code>{p['code']}</code> — {p['bonus_rub']:.0f}₽ | {p['used_count']}/{p['max_uses']}")
+    await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=b.as_markup())
+    await callback.answer()
+
 @router.callback_query(F.data == "adm_back")
 async def adm_back(callback: CallbackQuery):
     await callback.message.edit_text("👑 <b>Панель администратора</b>", parse_mode="HTML", reply_markup=kb_admin())
@@ -391,4 +432,39 @@ async def adm_back(callback: CallbackQuery):
 @router.callback_query(F.data == "adm_add_srv_info")
 async def adm_add_srv_info(callback: CallbackQuery):
     await callback.message.answer("Используй команду /addserver.")
+    await callback.answer()
+
+# ── Быстрые действия из уведомлений ──
+
+@router.callback_query(F.data.startswith("adm_userinfo_"))
+async def cb_adm_userinfo_btn(callback: CallbackQuery):
+    uid = int(callback.data.split("_")[-1])
+    u = await get_user(uid)
+    if not u: return await callback.answer("Не найден")
+    status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
+    text = f"👤 {u['full_name']}\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽"
+    b = InlineKeyboardBuilder(); b.button(text="💳 +50 ₽", callback_data=f"adm_gift_{uid}"); b.button(text="🚫 Бан", callback_data=f"adm_ban_{uid}"); b.button(text="◀️ Назад", callback_data=f"adm_card_{uid}"); b.adjust(2, 1)
+    await callback.message.edit_text(text, reply_markup=b.as_markup()); await callback.answer()
+
+@router.callback_query(F.data.startswith("adm_gift_"))
+async def cb_adm_gift_btn(callback: CallbackQuery, bot: Bot):
+    uid = int(callback.data.split("_")[-1])
+    await add_balance(uid, 50.0); await add_transaction(uid, 50.0, "admin_gift", "Gift")
+    try: await bot.send_message(uid, "🎁 Начислено 50 ₽!")
+    except: pass
+    asyncio.create_task(billing_tick(bot))
+    await callback.answer("✅ Начислено 50 ₽"); await adm_back(callback)
+
+@router.callback_query(F.data.startswith("adm_ban_"))
+async def cb_adm_ban_btn(callback: CallbackQuery):
+    uid = int(callback.data.split("_")[-1])
+    u = await get_user(uid)
+    await update_user(uid, is_banned=1, xui_enabled=0)
+    if u and u.get("vless_uuid"): await XUI.toggle_client(f"user_{uid}", u["vless_uuid"], False, u.get("sub_id", ""))
+    await callback.answer("🚫 Забанен"); await adm_back(callback)
+
+@router.callback_query(F.data.startswith("adm_card_"))
+async def cb_adm_card_btn(callback: CallbackQuery):
+    uid = int(callback.data.split("_")[-1])
+    await callback.message.edit_text(f"🆕 Пользователь {uid}", reply_markup=kb_new_user(uid))
     await callback.answer()

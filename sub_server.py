@@ -29,32 +29,38 @@ def get_db_conn():
     return conn
 
 def get_user_by_sub(sub_id: str) -> dict | None:
+    conn = None
     try:
-        with get_db_conn() as conn:
-            row = conn.execute("SELECT * FROM users WHERE sub_id=?", (sub_id,)).fetchone()
-            if row: return dict(row)
-            if sub_id.isdigit():
-                row = conn.execute("SELECT * FROM users WHERE tg_id=?", (int(sub_id),)).fetchone()
-                return dict(row) if row else None
-            return None
+        conn = get_db_conn()
+        row = conn.execute("SELECT * FROM users WHERE sub_id=?", (sub_id,)).fetchone()
+        if row: return dict(row)
+        if sub_id.isdigit():
+            row = conn.execute("SELECT * FROM users WHERE tg_id=?", (int(sub_id),)).fetchone()
+            return dict(row) if row else None
+        return None
     except: return None
+    finally:
+        if conn: conn.close()
 
 def get_active_panels() -> list[dict]:
+    conn = None
     try:
-        with get_db_conn() as conn:
-            rows = conn.execute("SELECT * FROM panels").fetchall()
-            res = []
-            for r in rows:
-                p = dict(r)
-                for k in ['inbounds', 'inbound_ids']:
-                    val = p.get(k)
-                    if isinstance(val, str):
-                        try: p[k] = json.loads(val or ('{}' if k=='inbounds' else '[]'))
-                        except: p[k] = {} if k=='inbounds' else []
-                    if p[k] is None: p[k] = {} if k=='inbounds' else []
-                res.append(p)
-            return res
+        conn = get_db_conn()
+        rows = conn.execute("SELECT * FROM panels").fetchall()
+        res = []
+        for r in rows:
+            p = dict(r)
+            for k in ['inbounds', 'inbound_ids']:
+                val = p.get(k)
+                if isinstance(val, str):
+                    try: p[k] = json.loads(val or ('{}' if k=='inbounds' else '[]'))
+                    except: p[k] = {} if k=='inbounds' else []
+                if p[k] is None: p[k] = {} if k=='inbounds' else []
+            res.append(p)
+        return res
     except: return []
+    finally:
+        if conn: conn.close()
 
 def make_link(u_uuid, email, panel, cfg, iid):
     try:

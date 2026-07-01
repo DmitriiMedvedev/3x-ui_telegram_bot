@@ -25,13 +25,15 @@ _RETRY_DELAYS = (0.5, 1.5, 3.0)
 def _new_session() -> aiohttp.ClientSession:
     """Сессия без SSL-верификации (self-signed на localhost)."""
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=False),
+        connector=aiohttp.TCPConnector(ssl=False, use_dns_cache=False),
         cookie_jar=aiohttp.CookieJar(unsafe=True),
         timeout=aiohttp.ClientTimeout(total=20),
     )
 
 async def _login(session: aiohttp.ClientSession, panel: Dict) -> bool:
-    base_url = f"https://{panel['host']}:{panel['port']}"
+    host = panel.get('host', "").strip()
+    if not host: return False
+    base_url = f"https://{host}:{panel['port']}"
     path = panel['path']
     try:
         async with session.post(
@@ -80,7 +82,9 @@ class XUIClient:
         if panel_idx not in self.loggedIn:
             return None
         panel = self.panels_list[panel_idx]
-        base_url = f"https://{panel['host']}:{panel['port']}"
+        host = panel.get('host', "").strip()
+        if not host: return None
+        base_url = f"https://{host}:{panel['port']}"
         headers = {}
         if panel.get("api_token"):
             headers["Authorization"] = f"Bearer {panel['api_token']}"
@@ -110,7 +114,9 @@ async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None
             if not await _login(sess, panel):
                 return None
 
-        base_url = f"https://{panel['host']}:{panel['port']}"
+        host = panel.get('host', "").strip()
+        if not host: return None
+        base_url = f"https://{host}:{panel['port']}"
         try:
             async with sess.post(
                 f"{base_url}{panel['path']}{endpoint}", data=payload, headers=headers
@@ -137,7 +143,9 @@ async def _get_single(panel: dict, endpoint: str) -> dict | None:
             if not await _login(sess, panel):
                 return None
 
-        base_url = f"https://{panel['host']}:{panel['port']}"
+        host = panel.get('host', "").strip()
+        if not host: return None
+        base_url = f"https://{host}:{panel['port']}"
         try:
             async with sess.get(f"{base_url}{panel['path']}{endpoint}", headers=headers) as r:
                 if r.status == 200:
