@@ -1,80 +1,38 @@
-# Dobrinya VPN Bot v14
+# Dobrinya VPN Bot v15 (Multi-Panel Edition)
 
-## Что изменилось по сравнению с v13
+## Что нового (Multi-Panel & Dynamic Configs)
 
-### 🔧 Критические исправления совместимости с 3X-UI 2.x
+Бот полностью переработан для управления конфигурациями через SQLite базу данных вместо статического `config.py`. Теперь вы можете подключать и управлять **несколькими 3X-UI серверами одновременно** прямо из Telegram-чата администратора!
 
-#### 1. Retry-логика для `addClient` (исправляет баг 3X-UI 2.6.2)
-В 3X-UI 2.6.2 endpoint `/panel/api/inbounds/addClient` периодически возвращает
-пустой ответ без тела. Бот теперь делает до **3 попыток** с задержками 0.5 / 1.5 / 3.0 с.
-
-```
-# xui.py
-_ADD_RETRIES = 3
-_RETRY_DELAYS = (0.5, 1.5, 3.0)
-```
-
-#### 2. Новый endpoint для трафика клиента
-Вместо парсинга всего `/panel/api/inbounds/list` используется:
-```
-GET /panel/api/inbounds/getClientTraffics/{email}
-```
-Это быстрее, меньше нагрузка на панель, возвращает up/down отдельно.
-
-#### 3. `subId` в payload клиента
-При создании клиента `subId` теперь включается в объект клиента:
-```python
-client = {
-    "id":    client_uuid,
-    "email": email,
-    "subId": sub_id,    # ← НОВОЕ: панель ведёт свою native subscription
-    ...
-}
-```
-Это значит, что нативная subscription 3X-UI (порт 2096) тоже работает.
-
-#### 4. Многопротокольная поддержка
-Клиент добавляется во все inbound'ы из `INBOUND_IDS` одновременно.
-Все ссылки (VLESS Reality + XHTTP + gRPC + SS) сохраняются в `configs_all`.
-
-#### 5. Правильный формат subscription
-`sub_server.py` теперь отдаёт `base64(link1\nlink2\n...)` — стандартный формат,
-который понимают v2rayNG, Hiddify, NekoBox, Streisand и другие клиенты.
+### Ключевые изменения:
+1. **Динамическое добавление серверов:** Команды `/addserver` и `/addinbound` позволяют подключать новые 3X-UI сервера прямо на лету (например, из Финляндии, Германии и т.д.).
+2. **Единая подписка (Multi-Panel):** Клиенты автоматически создаются на *всех* серверах. `sub_server.py` объединяет ссылки со всех серверов и отдает пользователю один общий base64 конфиг подписки!
+3. **Безопасность:** Никакие логины, пароли, ключи и пути от серверов 3X-UI больше не хранятся в открытом виде в файле `config.py`.
+4. **Суммированный биллинг:** Потребление трафика автоматически агрегируется (суммируется) по всем добавленным серверам.
 
 ---
 
 ## Быстрый старт
 
-### 1. Добавление серверов и конфигов (через Telegram-бота)
-Вместо редактирования `config.py` администратор добавляет новые сервера и конфиги (инбаунды) непосредственно через Telegram-бота, используя команды `/addserver` и `/addinbound`.
+### 1. Настройка окружения (`.env`)
 
-Заполни свои реальные значения:
+Скопируйте пример окружения и заполните **только** токены. Конфиги серверов мы добавим позже через бота.
 
-```python
-BOT_TOKEN   = "токен от @BotFather"
-ADMIN_IDS   = [твой_telegram_id]
-
-XUI_PORT    = 2053              # порт панели
-XUI_PATH    = "/твой_секретный_путь"
-XUI_LOGIN   = "логин"
-XUI_PASSWORD = "пароль"
-
-# ID inbound'ов — проверь в 3X-UI → Inbounds
-INBOUND_IDS = [1, 2, 4]        # XHTTP, Reality, gRPC
-
-# Заполни параметры каждого inbound
-INBOUND_CONFIGS = {
-    1: { "label": "XHTTP", "port": 443, ... },
-    2: { "label": "Reality", "port": 8443, "public_key": "...", ... },
-    ...
-}
+```bash
+cp .env.example .env
 ```
 
-**Как найти ID inbound'а:** открой 3X-UI → список inbounds → первая колонка.
+Внутри `.env` вам понадобятся:
+```ini
+BOT_TOKEN="токен от @BotFather"
+CRYPTOBOT_TOKEN="токен от @CryptoBot" (если нужна оплата криптой)
+SUB_PORT=8080
+SUB_BASE_URL="http://ip_вашего_бота:8080/sub"
+```
 
-**Как найти public_key для Reality:** 3X-UI → inbound → настройки → Reality → Public Key.
+Также не забудьте указать свой Telegram ID в списке `ADMIN_IDS` в файле `config.py`.
 
-### 2. Установка на сервере
+### 2. Установка на сервере бота
 
 ```bash
 cd /root
@@ -84,9 +42,6 @@ cd dobrinya_bot
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# Проверка подключения к 3X-UI
-python3 -c "import asyncio; import xui; print(asyncio.run(xui.check_connection()))"
 ```
 
 ### 3. Systemd сервисы
@@ -106,11 +61,14 @@ systemctl start dobrinya-sub
 journalctl -u dobrinya-bot -f
 ```
 
-### 4. Миграция с v13
+### 4. Подключение 3X-UI серверов
 
-БД совместима. При первом запуске v14 автоматически добавится колонка `configs_all`.
-Существующие пользователи сохранят свои `vless_link` (старая Reality ссылка).
-Новые пользователи получат полную подписку со всеми протоколами.
+Как только бот запущен, напишите ему в Telegram (вы должны быть в `ADMIN_IDS`):
+
+1. Выполните `/addserver`. Бот пошагово запросит IP сервера, порт панели 3X-UI, секретный путь (path), логин и пароль. Он сам проверит соединение и сохранит сервер в БД.
+2. Выполните `/addinbound`. Выберите добавленный сервер и просто вставьте **сырой JSON**, скопированный из панели 3X-UI (Inbounds -> Export). Бот автоматически распарсит настройки Reality, XHTTP, gRPC, TLS или Shadowsocks, извлечет ключи и будет готов выдавать их пользователям!
+
+Готово! Как только вы добавили Inbound, новые (и текущие) клиенты начнут получать свои конфигурации с этого сервера.
 
 ---
 
@@ -118,89 +76,18 @@ journalctl -u dobrinya-bot -f
 
 ```
 dobrinya_bot/
-├── config.py           ← РЕДАКТИРОВАТЬ
+├── config.py           ← основные тарифы, лимиты, ADMIN_IDS
 ├── bot.py              ← точка входа
-├── database.py         ← SQLite
-├── xui.py              ← 3X-UI API wrapper
-├── billing.py          ← биллинг по трафику
+├── database.py         ← SQLite (хранит пользователей и сервера/панели)
+├── xui.py              ← 3X-UI API wrapper (Multi-Panel)
+├── billing.py          ← биллинг с агрегацией трафика по серверам
 ├── keyboards.py        ← клавиатуры
-├── sub_server.py       ← subscription HTTP сервер (port 8080)
+├── sub_server.py       ← HTTP сервер подписок (port 8080)
 ├── handlers/
 │   ├── user.py         ← пользовательские команды
-│   ├── admin.py        ← /admin панель
-│   └── trial.py        ← пробный период
-├── dobrinya-bot.service
-├── dobrinya-sub.service
+│   ├── admin.py        ← /admin панель, /addserver, /addinbound
 └── requirements.txt
 ```
-
----
-
-## Настройка inbound'ов в config.py
-
-### VLESS Reality
-
-```python
-2: {
-    "label":      "Reality",
-    "protocol":   "vless",
-    "host":       SERVER_HOST,
-    "port":       8443,
-    "network":    "tcp",
-    "security":   "reality",
-    "public_key": "ПУБЛИЧНЫЙ_КЛЮЧ_ИЗ_ПАНЕЛИ",
-    "short_id":   "SHORT_ID_ИЗ_ПАНЕЛИ",
-    "sni":        "www.nvidia.com",
-    "flow":       "xtls-rprx-vision",
-},
-```
-
-### VLESS XHTTP (443)
-
-```python
-1: {
-    "label":    "XHTTP",
-    "protocol": "vless",
-    "host":     SERVER_HOST,
-    "port":     443,
-    "network":  "xhttp",
-    "security": "tls",
-    "sni":      "домен_для_TLS",
-    "flow":     "",
-},
-```
-
-### VLESS gRPC
-
-```python
-4: {
-    "label":        "gRPC",
-    "protocol":     "vless",
-    "host":         SERVER_HOST,
-    "port":         9443,
-    "network":      "grpc",
-    "security":     "tls",
-    "sni":          "домен_для_TLS",
-    "grpc_service": "grpc",   # имя service из настроек inbound
-    "flow":         "",
-},
-```
-
-### Shadowsocks (общий inbound, не добавляем клиентов)
-
-```python
-3: {
-    "label":    "Shadowsocks",
-    "protocol": "ss",
-    "host":     SERVER_HOST,
-    "port":     8388,
-    "method":   "chacha20-poly1305",
-    "password": "ПАРОЛЬ_ИЗ_ПАНЕЛИ",
-},
-```
-
-> ⚠️ SS inbound с `chacha20-poly1305` — **одиночный пользователь**.
-> Не включай его в `INBOUND_IDS`. Ссылка добавляется автоматически через `make_ss_link()`.
 
 ---
 
@@ -209,7 +96,8 @@ dobrinya_bot/
 | Команда                    | Описание                              |
 |----------------------------|---------------------------------------|
 | `/admin`                   | Панель со статистикой                 |
-| `/pending`                 | Заявки на пробный период              |
+| `/addserver`               | Подключить новую панель 3X-UI         |
+| `/addinbound`              | Добавить JSON конфиг к панели 3X-UI   |
 | `/setbalance ID СУММА`     | Изменить баланс пользователя          |
 | `/ban ID` / `/unban ID`    | Бан / разбан                          |
 | `/reply ID текст`          | Ответить пользователю                 |
@@ -218,21 +106,3 @@ dobrinya_bot/
 | `/billing`                 | Принудительный billing tick           |
 | `/debugtraffic`            | Диагностика трафика                   |
 | `/userinfo ID`             | Полная инфо + конфиги пользователя    |
-
----
-
-## Диагностика
-
-### 3X-UI недоступен при старте
-```
-⚠️ 3X-UI: недоступен — проверь порт/путь
-```
-Проверь: `XUI_PORT`, `XUI_PATH`, `XUI_LOGIN`, `XUI_PASSWORD` в `config.py`.
-
-### addClient возвращает пустой ответ
-Это **известный баг** 3X-UI 2.6.2. Бот автоматически делает до 3 попыток.
-Если все 3 провалились — смотри логи: `journalctl -u dobrinya-bot -f`.
-
-### Трафик не считается
-Запусти `/debugtraffic` в боте. Проверь, что `BILLING_INBOUND_IDS` содержит
-правильные ID inbound'ов, и что email пользователей (`user_{tg_id}`) есть в панели.
