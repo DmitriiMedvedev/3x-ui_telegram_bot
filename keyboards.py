@@ -57,8 +57,8 @@ def kb_admin() -> InlineKeyboardMarkup:
     b.button(text="👥 Пользователи",    callback_data="adm_users")
     b.button(text="📊 Прибыль",         callback_data="adm_revenue")
     b.button(text="🎁 Промокоды",       callback_data="adm_promos")
-    b.button(text="➕ Создать промокод", callback_data="adm_new_promo")
-    b.adjust(2, 2)
+    b.button(text="🖥 Серверы 3X-UI",    callback_data="adm_panels")
+    b.adjust(2)
     return b.as_markup()
 
 

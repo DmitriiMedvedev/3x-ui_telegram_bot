@@ -155,7 +155,7 @@ async def _get_single(panel: dict, endpoint: str) -> dict | None:
 def _build_client_obj(
     client_uuid: str, email: str, sub_id: str, inbound_id: int, panel: dict, exp_ms: int = 0
 ) -> dict:
-    cfg = panel.get("inbounds", {}).get(inbound_id, {})
+    cfg = panel.get("inbounds", {}).get(str(inbound_id)) or panel.get("inbounds", {}).get(int(inbound_id)) or {}
     return {
         "id":         client_uuid,
         "email":      email,
@@ -176,264 +176,150 @@ async def _add_to_inbound(panel: dict, inbound_id: int, client_obj: dict) -> boo
     }
     for attempt in range(_ADD_RETRIES):
         res = await _post_single(panel, "/panel/api/inbounds/addClient", payload)
-        if res and res.get("success"):
-            logger.info(
-                f"addClient inbound={inbound_id} email={client_obj['email']} on {panel['name']} "
-                f"✓ (попытка {attempt + 1})"
-            )
-            return True
+        if res:
+            if res.get("success") or "already exists" in str(res.get("msg", "")).lower():
+                logger.info(f"addClient inbound={inbound_id} email={client_obj['email']} on {panel['name']} ✓")
+                return True
         if attempt < _ADD_RETRIES - 1:
-            delay = _RETRY_DELAYS[attempt]
-            await asyncio.sleep(delay)
-    logger.error(
-        f"addClient inbound={inbound_id} email={client_obj['email']} on {panel['name']}: "
-        f"все {_ADD_RETRIES} попытки неудачны"
-    )
+            await asyncio.sleep(_RETRY_DELAYS[attempt])
     return False
 
-# Adds a client to the 3X-UI panel and generates links.
-async def add_client(email: str, expire_days: int = 0) -> dict | None:
-    client_uuid = str(uuid.uuid4())
-    sub_id      = uuid.uuid4().hex
-    exp_ms      = (
-        int((datetime.now() + timedelta(days=expire_days)).timestamp() * 1000)
-        if expire_days > 0 else 0
-    )
-
+# Adds a client to all panels in the background.
+async def add_client_background(email: str, client_uuid: str, sub_id: str, expire_days: int = 0):
+    exp_ms = int((datetime.now() + timedelta(days=expire_days)).timestamp() * 1000) if expire_days > 0 else 0
     panels = await get_all_panels()
-    vless_added = False
-
     for panel in panels:
         for iid in panel.get("inbound_ids", []):
             obj = _build_client_obj(client_uuid, email, sub_id, iid, panel, exp_ms)
-            ok  = await _add_to_inbound(panel, iid, obj)
-            if ok: vless_added = True
+            await _add_to_inbound(panel, iid, obj)
 
-    # Генерируем конфиги. Если есть хоть один конфиг (даже если только SS), считаем успехом.
-    configs = await make_configs(client_uuid, email)
-    if not configs:
-        logger.error(f"add_client {email}: failed to generate any configs")
-        return None
-
+# Legacy helper (still used in some places)
+async def add_client(email: str, expire_days: int = 0) -> dict | None:
+    client_uuid = str(uuid.uuid4())
+    sub_id      = uuid.uuid4().hex
+    await add_client_background(email, client_uuid, sub_id, expire_days)
     return {
         "uuid":    client_uuid,
         "sub_id":  sub_id,
-        "configs": configs,
+        "configs": await make_configs(client_uuid, email),
     }
 
 # Enables or disables a client in the 3X-UI panel.
-async def toggle_client(
-    email: str,
-    client_uuid: str,
-    enable: bool,
-    sub_id: str = "",
-) -> bool:
+async def toggle_client(email: str, client_uuid: str, enable: bool, sub_id: str = "") -> bool:
     ok_count = 0
     panels = await get_all_panels()
     for panel in panels:
         for iid in panel.get("inbound_ids", []):
-            cfg = panel.get("inbounds", {}).get(iid, {})
+            cfg = panel.get("inbounds", {}).get(str(iid)) or panel.get("inbounds", {}).get(int(iid)) or {}
             client = {
-                "id":         client_uuid,
-                "email":      email,
-                "enable":     enable,
-                "flow":       cfg.get("flow", ""),
-                "limitIp":    0,
-                "totalGB":    0,
-                "alterId":    0,
-                "tgId":       "",
-                "expiryTime": 0,
-                "subId":      sub_id,
+                "id": client_uuid, "email": email, "enable": enable, "flow": cfg.get("flow", ""),
+                "limitIp": 0, "totalGB": 0, "alterId": 0, "tgId": "", "expiryTime": 0, "subId": sub_id,
             }
-            payload = {
-                "id":       str(iid),
-                "settings": json.dumps({"clients": [client]}),
-            }
+            payload = {"id": str(iid), "settings": json.dumps({"clients": [client]})}
             res = await _post_single(panel, f"/panel/api/inbounds/updateClient/{client_uuid}", payload)
-            if res and res.get("success"):
-                ok_count += 1
+            if res and res.get("success"): ok_count += 1
     return ok_count > 0
 
-async def bulk_toggle(
-    clients: list[tuple[str, str, bool, str]]
-) -> int:
-    if not clients:
-        return 0
+async def bulk_toggle(clients: list[tuple[str, str, bool, str]]) -> int:
+    if not clients: return 0
     ok_count = 0
     try:
         async with XUIClient() as xui:
             for email, client_uuid, enable, sub_id in clients:
                 for idx, panel in enumerate(xui.panels_list):
                     for iid in panel.get("inbound_ids", []):
-                        cfg = panel.get("inbounds", {}).get(iid, {})
+                        cfg = panel.get("inbounds", {}).get(str(iid)) or panel.get("inbounds", {}).get(int(iid)) or {}
                         client = {
-                            "id":         client_uuid,
-                            "email":      email,
-                            "enable":     enable,
-                            "flow":       cfg.get("flow", ""),
-                            "limitIp":    0,
-                            "totalGB":    0,
-                            "alterId":    0,
-                            "tgId":       "",
-                            "expiryTime": 0,
-                            "subId":      sub_id,
+                            "id": client_uuid, "email": email, "enable": enable, "flow": cfg.get("flow", ""),
+                            "limitIp": 0, "totalGB": 0, "alterId": 0, "tgId": "", "expiryTime": 0, "subId": sub_id,
                         }
-                        payload = {
-                            "id":       str(iid),
-                            "settings": json.dumps({"clients": [client]}),
-                        }
+                        payload = {"id": str(iid), "settings": json.dumps({"clients": [client]})}
                         res = await xui.post(idx, f"/panel/api/inbounds/updateClient/{client_uuid}", payload)
-                        if res and res.get("success"):
-                            ok_count += 1
-    except RuntimeError as e:
-        logger.error(f"bulk_toggle: {e}")
+                        if res and res.get("success"): ok_count += 1
+    except Exception as e: logger.error(f"bulk_toggle: {e}")
     return ok_count
 
-# Retrieves upload/download statistics for a given client email.
 async def get_client_traffic(email: str) -> dict | None:
-    total_up = 0
-    total_down = 0
-    enable = True
-    expiry_time = 0
-    found = False
-
+    total_up, total_down, found = 0, 0, False
     panels = await get_all_panels()
     for panel in panels:
         res = await _get_single(panel, f"/panel/api/inbounds/getClientTraffics/{email}")
-        if not (res and res.get("success") and res.get("obj")):
-            continue
+        if not (res and res.get("success") and res.get("obj")): continue
         obj = res["obj"]
         found = True
         if isinstance(obj, list):
-            if not obj:
-                continue
-            total_up    += sum(o.get("up",   0) for o in obj)
-            total_down  += sum(o.get("down", 0) for o in obj)
-            enable      = enable and any(o.get("enable", True) for o in obj)
-            if obj[0].get("expiryTime", 0) > expiry_time:
-                expiry_time = obj[0].get("expiryTime", 0)
+            total_up += sum(o.get("up", 0) for o in obj)
+            total_down += sum(o.get("down", 0) for o in obj)
         else:
-            total_up    += obj.get("up",   0)
-            total_down  += obj.get("down", 0)
-            enable      = enable and obj.get("enable", True)
-            if obj.get("expiryTime", 0) > expiry_time:
-                expiry_time = obj.get("expiryTime", 0)
-
-    if not found:
-        return None
-    return {"up": total_up, "down": total_down, "total": total_up + total_down,
-            "enable": enable, "expiryTime": expiry_time}
+            total_up += obj.get("up", 0)
+            total_down += obj.get("down", 0)
+    return {"up": total_up, "down": total_down, "total": total_up + total_down} if found else None
 
 async def get_traffic() -> dict[str, int] | None:
-    result: dict[str, int] = {}
-    found_any = False
+    result, found_any = {}, False
     panels = await get_all_panels()
     for panel in panels:
         res = await _get_single(panel, "/panel/api/inbounds/list")
-        if not res or not res.get("success"):
-            logger.error(f"get_traffic failed on {panel['name']}: {res}")
-            continue
-
+        if not res or not res.get("success"): continue
         found_any = True
-        billing_ids = set(panel.get("billing_inbound_ids", []))
+        billing_ids = set(map(str, panel.get("billing_inbound_ids", [])))
         for inbound in (res.get("obj") or []):
-            if inbound.get("id") not in billing_ids:
-                continue
+            if str(inbound.get("id")) not in billing_ids: continue
             for cs in (inbound.get("clientStats") or []):
-                email         = cs.get("email", "")
-                total         = cs.get("up", 0) + cs.get("down", 0)
-                result[email] = result.get(email, 0) + total
-
-    if not found_any:
-        return None
-    return result
-
-# ── Link generation ────────────────────────────────────────────────────────────
+                email = cs.get("email", "")
+                result[email] = result.get(email, 0) + cs.get("up", 0) + cs.get("down", 0)
+    return result if found_any else None
 
 def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) -> str:
-    cfg     = panel.get("inbounds", {}).get(inbound_id, {})
-    host    = cfg.get("host", panel.get("server_host", "127.0.0.1"))
-    port    = cfg.get("port", 443)
-    network = cfg.get("network", "tcp")
-    sec     = cfg.get("security", "none")
-    label   = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-{cfg.get('label', str(inbound_id))}")
-
-    params: dict[str, str] = {"type": network, "security": sec}
-
+    inbounds = panel.get("inbounds", {})
+    cfg = inbounds.get(str(inbound_id)) or inbounds.get(int(inbound_id)) if str(inbound_id).isdigit() else inbounds.get(str(inbound_id))
+    if not cfg: return ""
+    host, port, network, sec = cfg.get("host") or panel.get("server_host", "127.0.0.1"), cfg.get("port", 443), cfg.get("network", "tcp"), cfg.get("security", "none")
+    label = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-{cfg.get('label', str(inbound_id))}")
+    params = {"type": network, "security": sec}
     if sec == "reality":
-        params["pbk"] = cfg.get("public_key", "")
-        params["fp"]  = cfg.get("fingerprint", "chrome")
-        params["sni"] = cfg.get("sni", "")
-        params["sid"] = cfg.get("short_id", "")
-        if cfg.get("flow"):
-            params["flow"] = cfg["flow"]
-
-    elif sec == "tls":
-        params["sni"] = cfg.get("sni", "")
-
-    if network == "xhttp":
-        params["path"] = cfg.get("path", "/")
-        params["mode"] = cfg.get("xhttp_mode", "auto")
-    elif network == "grpc":
-        params["serviceName"] = cfg.get("grpc_service", "grpc")
-        params["mode"]        = "gun"
+        params.update({"pbk": cfg.get("public_key", ""), "fp": cfg.get("fingerprint", "chrome"), "sni": cfg.get("sni", ""), "sid": cfg.get("short_id", "")})
+        if cfg.get("flow"): params["flow"] = cfg["flow"]
+    elif sec == "tls": params["sni"] = cfg.get("sni", "")
+    if network == "xhttp": params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
+    elif network == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
     elif network == "ws":
         params["path"] = cfg.get("path", "/")
-        if cfg.get("ws_host"):
-            params["host"] = cfg["ws_host"]
-
-    query = "&".join(
-        f"{k}={urllib.parse.quote(str(v), safe='')}"
-        for k, v in params.items()
-        if v
-    )
+        if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
+    query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items() if v)
     return f"vless://{client_uuid}@{host}:{port}?{query}#{label}"
-
 
 def make_ss_link(email: str, panel: dict) -> str:
     import base64
     for iid, cfg in panel.get("inbounds", {}).items():
-        if cfg.get("protocol") == "ss":
-            method   = cfg.get("method", "chacha20-poly1305")
-            password = cfg.get("password", "")
-            host     = cfg.get("host", panel.get("server_host", "127.0.0.1"))
-            port     = cfg.get("port", 8388)
-            if not password:
-                return ""
+        if str(cfg.get("protocol", "")).lower() in ["ss", "shadowsocks"]:
+            method, password = cfg.get("method", "chacha20-poly1305"), cfg.get("password", "")
+            host, port = panel.get("server_host", "127.0.0.1"), cfg.get("port", 8388)
+            if not password: continue
             label = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-SS")
-            cred  = base64.b64encode(f"{method}:{password}".encode()).decode()
+            cred = base64.b64encode(f"{method}:{password}".encode()).decode()
             return f"ss://{cred}@{host}:{port}#{label}"
     return ""
 
 async def make_configs(client_uuid: str, email: str) -> str:
-    links: list[str] = []
-    panels = await get_all_panels()
+    links, panels = [], await get_all_panels()
     for panel in panels:
         for iid in panel.get("inbound_ids", []):
-            cfg = panel.get("inbounds", {}).get(iid, {})
-            if cfg.get("protocol") == "vless":
-                links.append(make_vless_link(client_uuid, email, panel, iid))
+            link = make_vless_link(client_uuid, email, panel, iid)
+            if link: links.append(link)
         ss = make_ss_link(email, panel)
-        if ss:
-            links.append(ss)
+        if ss: links.append(ss)
     return "\n".join(links)
 
 def make_sub_url(sub_id: str) -> str:
     return f"{SUB_BASE_URL}/{sub_id}"
 
 async def check_connection() -> bool:
-    any_success = False
-    panels = await get_all_panels()
+    any_success, panels = False, await get_all_panels()
     for panel in panels:
         async with _new_session() as sess:
             if panel.get("api_token"):
                 res = await _get_single(panel, "/panel/api/inbounds/list")
-                if res and res.get("success"):
-                    any_success = True
-                else:
-                    logger.error(f"Failed to connect to panel using API Token: {panel['name']}")
-            elif await _login(sess, panel):
-                any_success = True
-            else:
-                logger.error(f"Failed to connect to panel: {panel['name']}")
+                if res and res.get("success"): any_success = True
+            elif await _login(sess, panel): any_success = True
     return any_success
