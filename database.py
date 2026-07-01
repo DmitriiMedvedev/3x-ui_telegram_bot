@@ -9,9 +9,7 @@ import uuid
 import os
 from datetime import datetime
 
-# Абсолютные пути для исключения рассинхрона между ботом и sub_server
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "dobrinya.db")
+from config import DB_PATH
 
 logger  = logging.getLogger(__name__)
 

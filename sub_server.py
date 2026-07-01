@@ -14,11 +14,7 @@ import aiohttp
 import logging
 from aiohttp import web
 
-# Определение пути к БД
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "dobrinya.db")
-if not os.path.exists(DB_PATH):
-    DB_PATH = "/root/dobrinya_bot/3x-ui_telegram_bot/dobrinya.db"
+from config import DB_PATH
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -146,23 +142,35 @@ async def handle_sub(request: web.Request) -> web.Response:
         all_links = []
 
         # 1. Пытаемся получить нативные ссылки (Proxy mode)
+        diag_log = [f"Sub Request: {sub_id}", f"User: {email}", f"UUID: {u_uuid}", f"Panels count: {len(panels)}"]
+
         async with aiohttp.ClientSession() as session:
-            tasks = [fetch_panel_sub(session, p, user['sub_id']) for p in panels]
-            results = await asyncio.gather(*tasks)
-            for res in results:
-                if res: all_links.extend(decode_sub(res))
+            for p in panels:
+                res = await fetch_panel_sub(session, p, user['sub_id'])
+                if res:
+                    links = decode_sub(res)
+                    all_links.extend(links)
+                    diag_log.append(f" - Panel '{p['name']}': Success, got {len(links)} links.")
+                else:
+                    diag_log.append(f" - Panel '{p['name']}': Failed (unreachable or 404).")
 
         # 2. Если проксирование не дало результатов, генерируем сами (Fallback mode)
         if not all_links:
-            logger.info(f"Sub {sub_id}: Proxy failed or returned no links. Using fallback generator.")
+            diag_log.append("Proxy failed for all panels. Trying fallback generation...")
             for p in panels:
                 ibs = p.get("inbounds") or {}
+                p_links = 0
                 for iid, cfg in ibs.items():
                     link = make_fallback_link(u_uuid, email, p, cfg, iid)
-                    if link: all_links.append(link)
+                    if link:
+                        all_links.append(link)
+                        p_links += 1
+                diag_log.append(f" - Fallback '{p['name']}': generated {p_links} links.")
 
         if not all_links:
-            return web.Response(text=f"ERROR: No active configurations found for user {email} on any panel.\nCheck if Inbounds are added in /admin and /sync was performed.", status=404)
+            msg = "ERROR: No active configurations found.\n\nDIAGNOSTIC LOG:\n" + "\n".join(diag_log)
+            logger.error(msg)
+            return web.Response(text=msg, status=404)
 
         unique_links = list(dict.fromkeys(all_links))
         content = base64.b64encode("\n".join(unique_links).encode()).decode()

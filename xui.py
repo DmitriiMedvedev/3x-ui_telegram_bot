@@ -307,9 +307,16 @@ def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) 
     label = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-{cfg.get('label', str(inbound_id))}")
     params = {"type": network, "security": sec}
     if sec == "reality":
-        params.update({"pbk": cfg.get("public_key", ""), "fp": cfg.get("fingerprint", "chrome"), "sni": cfg.get("sni", ""), "sid": cfg.get("short_id", "")})
+        params.update({
+            "pbk": cfg.get("public_key", ""),
+            "fp": cfg.get("fingerprint", "chrome"),
+            "sni": cfg.get("sni", ""),
+            "sid": cfg.get("short_id", ""),
+            "spx": cfg.get("spiderX", "/")
+        })
         if cfg.get("flow"): params["flow"] = cfg["flow"]
-    elif sec == "tls": params["sni"] = cfg.get("sni", "")
+    elif sec == "tls":
+        params["sni"] = cfg.get("sni", "")
     if network == "xhttp": params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
     elif network == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
     elif network == "ws":

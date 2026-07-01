@@ -79,10 +79,33 @@ async def cmd_sync(message: Message):
     count = 0
     for u in users:
         if u.get("vless_uuid") and u.get("sub_id"):
+            # Форсируем добавление на все панели
             await XUI.add_client_background(f"user_{u['tg_id']}", u['vless_uuid'], u['sub_id'])
             count += 1
             if count % 10 == 0: await asyncio.sleep(0.2)
     await msg.edit_text(f"✅ Готово! Синхронизировано пользователей: {count} на {len(panels)} панелях.")
+
+@router.message(Command("status"))
+async def cmd_status(message: Message):
+    if not is_admin(message.from_user.id): return
+    panels = await get_all_panels()
+    if not panels: return await message.answer("Нет серверов.")
+
+    text = "🖥 <b>Статус серверов:</b>\n\n"
+    for p in panels:
+        async with XUI._new_session() as sess:
+            ok = False
+            if p.get("api_token"):
+                res = await XUI._get_single(p, "/panel/api/inbounds/list")
+                if res and res.get("success"): ok = True
+            else:
+                ok = await XUI._login(sess, p)
+
+            icon = "✅" if ok else "❌"
+            ibs = p.get("inbounds") or {}
+            text += f"{icon} <b>{p['name']}</b> ({p['host']})\n   Inbounds: {len(ibs)}\n   API: {'Token' if p.get('api_token') else 'Login'}\n\n"
+
+    await message.answer(text, parse_mode="HTML")
 
 # ── Управление серверами ──
 
@@ -159,9 +182,12 @@ async def process_server_name(message: Message, state: FSMContext):
 
 @router.message(AddServerStates.waiting_host)
 async def process_server_host(message: Message, state: FSMContext):
-    host = message.text.strip().lower()
-    if host.startswith('http'):
-        host = host.split('//')[-1].split('/')[0].split(':')[0]
+    import re
+    raw = message.text.strip().lower()
+    # Удаляем http://, https://, пути и порты
+    host = re.sub(r'^https?://', '', raw).split('/')[0].split(':')[0].strip('.')
+    if not host:
+        return await message.answer("❌ Неверный хост. Введи IP или домен:")
     await state.update_data(host=host)
     await state.set_state(AddServerStates.waiting_port)
     await message.answer("Порт панели:")
@@ -261,13 +287,23 @@ async def process_inbound_json(message: Message, state: FSMContext):
         elif isinstance(raw, dict) and isinstance(raw.get("obj"), dict): inbound = raw["obj"]
         else: inbound = raw
 
-        iid = inbound.get("id") or inbound.get("tag")
+        raw_iid = inbound.get("id") or inbound.get("tag")
         prot = str(inbound.get("protocol", "")).lower()
         if prot == "shadowsocks": prot = "ss"
 
-        if iid is None or not prot:
+        if raw_iid is None or not prot:
             await message.answer("❌ Ошибка: В JSON не найден ID/Tag или протокол.")
             return
+
+        # Пытаемся найти реальный числовой ID если нам дали тег
+        data = await state.get_data()
+        panel = await get_panel(data['panel_id'])
+
+        real_id = await XUI.get_real_inbound_id(panel, raw_iid)
+        iid = str(real_id) if real_id else str(raw_iid)
+
+        if not real_id:
+            logger.warning(f"Could not find numeric ID for inbound {raw_iid} on {panel['name']}. Using as is.")
 
         stream = inbound.get("streamSettings", {})
         cfg = {
@@ -288,27 +324,28 @@ async def process_inbound_json(message: Message, state: FSMContext):
 
         if cfg["security"] == "reality":
             rs = stream.get("realitySettings", {})
-            cfg.update({"public_key": rs.get("settings", {}).get("publicKey", ""), "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"), "sni": rs.get("serverNames", [""])[0], "short_id": rs.get("shortIds", [""])[0]})
+            cfg.update({
+                "public_key": rs.get("settings", {}).get("publicKey", ""),
+                "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"),
+                "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
+                "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
+                "spiderX": rs.get("settings", {}).get("spiderX", "/")
+            })
             cls = inbound.get("settings", {}).get("clients", [])
             cfg["flow"] = cls[0].get("flow", "") if cls else ""
-        elif prot == "ss":
+        elif cfg["security"] == "tls":
+            ts = stream.get("tlsSettings", {})
+            cfg.update({"sni": ts.get("serverName", "")})
+
+        if prot == "ss":
             s_set = inbound.get("settings", {})
             cfg.update({"method": s_set.get("method"), "password": s_set.get("password")})
 
-        data = await state.get_data()
-        panel = await get_panel(data['panel_id'])
         inbounds, ib_ids, bib_ids = panel.get('inbounds', {}), panel.get('inbound_ids', []), panel.get('billing_inbound_ids', [])
 
-        inbounds[str(iid)] = cfg
-        if str(iid) not in ib_ids and prot == "vless": ib_ids.append(str(iid))
-        if str(iid) not in bib_ids: bib_ids.append(str(iid))
-
-        # Пытаемся найти реальный ID если iid это тег
-        real_id = await XUI.get_real_inbound_id(panel, iid)
-        if real_id and str(real_id) != str(iid):
-            if str(real_id) not in ib_ids and prot == "vless": ib_ids.append(str(real_id))
-            if str(real_id) not in bib_ids: bib_ids.append(str(real_id))
-            logger.info(f"Mapping tag/port {iid} to real ID {real_id}")
+        inbounds[iid] = cfg
+        if iid not in ib_ids and prot == "vless": ib_ids.append(iid)
+        if iid not in bib_ids: bib_ids.append(iid)
 
         await update_panel_inbounds(panel['id'], ib_ids, bib_ids, inbounds)
         await message.answer(f"✅ Конфиг {iid} ({prot}) успешно добавлен на {panel['name']}.")
@@ -327,18 +364,31 @@ async def cmd_billing(message: Message, bot: Bot):
 @router.message(Command("debugtraffic"))
 async def cmd_debugtraffic(message: Message):
     if not is_admin(message.from_user.id): return
-    await message.answer("⏳ Запрашиваю трафик из 3X-UI...")
-    traffic = await XUI.get_traffic()
-    users = await get_all_users()
-    if traffic is None: return await message.answer("❌ Ошибка связи с 3X-UI")
-    lines = ["🔍 <b>Диагностика трафика</b>\n"]
-    for u in users[:20]:
-        if u.get("vless_uuid"):
-            email = f"user_{u['tg_id']}"
-            found = "✅" if email in traffic else "❌"
-            val = traffic.get(email, 0)
-            lines.append(f"{found} {email} | {fmt_bytes(val)} | bal={u['balance']:.1f}₽")
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    status_msg = await message.answer("⏳ Запрашиваю трафик со всех панелей...")
+    try:
+        traffic = await XUI.get_traffic()
+        users = await get_all_users()
+        if traffic is None:
+            return await status_msg.edit_text("❌ Ошибка связи с 3X-UI (не удалось опросить ни одну панель).")
+
+        lines = ["🔍 <b>Диагностика трафика (Топ 20):</b>\n"]
+        count = 0
+        for u in users:
+            if u.get("vless_uuid"):
+                email = f"user_{u['tg_id']}"
+                found = "✅" if email in traffic else "❌"
+                val = traffic.get(email, 0)
+                lines.append(f"{found} <code>{u['tg_id']}</code> | {fmt_bytes(val)} | {u['balance']:.1f}₽")
+                count += 1
+                if count >= 20: break
+
+        if count == 0:
+            lines.append("<i>Пользователей с конфигами пока нет.</i>")
+
+        await status_msg.edit_text("\n".join(lines), parse_mode="HTML")
+    except Exception as e:
+        logger.exception("Error in debugtraffic")
+        await status_msg.edit_text(f"❌ Фатальная ошибка: {str(e)}")
 
 @router.message(Command("setbalance"))
 async def cmd_setbalance(message: Message, bot: Bot):
