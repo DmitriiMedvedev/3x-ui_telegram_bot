@@ -1,14 +1,18 @@
 # Database module using aiosqlite for managing users, balances, and transactions.
 """
-database.py — Dobrinya VPN Bot v14.4 (Ultimate Robustness).
+database.py — Dobrinya VPN Bot v14.5 (Path & ID Consistency).
 """
 import aiosqlite
 import logging
 import json
 import uuid
+import os
 from datetime import datetime
 
-DB_PATH = "/root/dobrinya_bot/3x-ui_telegram_bot/dobrinya.db"
+# Автоматическое определение пути к базе для работы в любой папке
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "dobrinya.db")
+
 logger  = logging.getLogger(__name__)
 
 async def init_db():
@@ -39,7 +43,11 @@ async def init_db():
             ("sub_id", "TEXT DEFAULT ''"),
             ("xui_enabled", "INTEGER DEFAULT 1"),
             ("configs_all", "TEXT DEFAULT ''"),
-            ("sub_url", "TEXT DEFAULT ''")
+            ("sub_url", "TEXT DEFAULT ''"),
+            ("is_banned", "INTEGER DEFAULT 0"),
+            ("referred_by", "INTEGER DEFAULT NULL"),
+            ("last_traffic_bytes", "INTEGER DEFAULT 0"),
+            ("total_traffic_bytes", "INTEGER DEFAULT 0")
         ]
         for col, defn in _m:
             try: await db.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
@@ -52,7 +60,7 @@ async def init_db():
         except: pass
 
         await db.commit()
-    logger.info("БД инициализирована (v14.4)")
+    logger.info(f"БД инициализирована (v14.5). Путь: {DB_PATH}")
 
 def _safe_json_list(data_str: str) -> list:
     try:
@@ -74,7 +82,6 @@ async def get_or_create_user(tg_id: int, username: str, full_name: str, referred
         row = await (await db.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))).fetchone()
         if row:
             u_dict = dict(row)
-            # Если нет UUID/SubID — создаем их прямо здесь
             if not u_dict.get("vless_uuid") or not u_dict.get("sub_id"):
                 new_uuid = u_dict.get("vless_uuid") or str(uuid.uuid4())
                 new_sub  = u_dict.get("sub_id") or uuid.uuid4().hex
@@ -123,7 +130,7 @@ async def add_balance(tg_id: int, delta: float):
 async def get_all_users() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("SELECT * FROM users ORDER BY created_at DESC")).fetchall()
+        rows = await (await db.execute("SELECT * FROM users")).fetchall()
         return [dict(r) for r in rows]
 
 # ── Panels ─────────────────────────────────────────────────────────────────────
@@ -180,18 +187,21 @@ async def add_transaction(tg_id, amount, method, comment=""):
 async def get_revenue_stats() -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        row = await (await db.execute("SELECT SUM(CASE WHEN date(created_at)=date('now') THEN amount ELSE 0 END) as today, SUM(CASE WHEN date(created_at)>=date('now','-7 days') THEN amount ELSE 0 END) as week, SUM(CASE WHEN date(created_at)>=date('now','start of month') THEN amount ELSE 0 END) as month, SUM(amount) as total FROM transactions WHERE amount>0 AND method NOT IN ('referral','bonus','admin_gift')")).fetchone()
+        cur = await db.execute("SELECT SUM(CASE WHEN date(created_at)=date('now') THEN amount ELSE 0 END) as today, SUM(CASE WHEN date(created_at)>=date('now','-7 days') THEN amount ELSE 0 END) as week, SUM(CASE WHEN date(created_at)>=date('now','start of month') THEN amount ELSE 0 END) as month, SUM(amount) as total FROM transactions WHERE amount>0 AND method NOT IN ('referral','bonus','admin_gift')")
+        row = await cur.fetchone()
         return dict(row) if row else {}
 
 async def get_promo(code: str) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        row = await (await db.execute("SELECT * FROM promo_codes WHERE code=?", (code.upper(),))).fetchone()
+        cur = await db.execute("SELECT * FROM promo_codes WHERE code=?", (code.upper(),))
+        row = await cur.fetchone()
         return dict(row) if row else None
 
 async def promo_already_used(tg_id, promo_id) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        return await (await db.execute("SELECT 1 FROM promo_uses WHERE tg_id=? AND promo_id=?", (tg_id, promo_id))).fetchone() is not None
+        cur = await db.execute("SELECT 1 FROM promo_uses WHERE tg_id=? AND promo_id=?", (tg_id, promo_id))
+        return await cur.fetchone() is not None
 
 async def use_promo(tg_id, promo_id):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -207,7 +217,8 @@ async def create_promo(code, bonus, uses, created_by):
 async def get_all_promos() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("SELECT * FROM promo_codes ORDER BY created_at DESC")).fetchall()
+        cur = await db.execute("SELECT * FROM promo_codes ORDER BY created_at DESC")
+        rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
 async def add_referral_reward(referrer_id, referred_id, amount):
@@ -218,8 +229,10 @@ async def add_referral_reward(referrer_id, referred_id, amount):
 async def get_referral_stats(tg_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        c = await (await db.execute("SELECT COUNT(*) as cnt FROM users WHERE referred_by=?", (tg_id,))).fetchone()
-        t = await (await db.execute("SELECT SUM(amount) as total FROM referral_rewards WHERE referrer_id=?", (tg_id,))).fetchone()
+        c_cur = await db.execute("SELECT COUNT(*) as cnt FROM users WHERE referred_by=?", (tg_id,))
+        c = await c_cur.fetchone()
+        t_cur = await db.execute("SELECT SUM(amount) as total FROM referral_rewards WHERE referrer_id=?", (tg_id,))
+        t = await t_cur.fetchone()
         return {"count": c["cnt"] if c else 0, "earned": t["total"] or 0.0}
 
 async def save_crypto_invoice(invoice_id, tg_id, amount_rub):
@@ -230,7 +243,8 @@ async def save_crypto_invoice(invoice_id, tg_id, amount_rub):
 async def get_pending_crypto_invoices() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        rows = await (await db.execute("SELECT * FROM crypto_invoices WHERE status='active' ORDER BY created_at ASC")).fetchall()
+        cur = await db.execute("SELECT * FROM crypto_invoices WHERE status='active' ORDER BY created_at ASC")
+        rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
 async def mark_crypto_invoice_paid(invoice_id):
