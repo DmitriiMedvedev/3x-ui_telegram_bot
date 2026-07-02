@@ -1,6 +1,6 @@
 # Admin panel handlers for managing users, adding balances, banning, and checking stats.
 """
-handlers/admin.py — Admin panel v16.7 (Robust Inbound Parsing + Fully Functional UI).
+handlers/admin.py — Admin panel v17.2 (Robust Inbound Sync + Full UI).
 """
 import asyncio
 import logging
@@ -8,6 +8,7 @@ import random
 import string
 import json
 from datetime import datetime
+from html import escape
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
@@ -66,7 +67,8 @@ async def cmd_admin(message: Message):
         f"/billing — принудительное списание\n"
         f"/debugtraffic — диагностика\n"
         f"/userinfo ID — инфо о юзере\n"
-        f"/sync — синхронизировать всех юзеров",
+        f"/sync — синхронизировать всех юзеров\n"
+        f"/status — статус серверов",
         parse_mode="HTML", reply_markup=kb_admin(),
     )
 
@@ -79,7 +81,6 @@ async def cmd_sync(message: Message):
     count = 0
     for u in users:
         if u.get("vless_uuid") and u.get("sub_id"):
-            # Форсируем добавление на все панели
             await XUI.add_client_background(f"user_{u['tg_id']}", u['vless_uuid'], u['sub_id'])
             count += 1
             if count % 10 == 0: await asyncio.sleep(0.2)
@@ -103,7 +104,7 @@ async def cmd_status(message: Message):
 
             icon = "✅" if ok else "❌"
             ibs = p.get("inbounds") or {}
-            text += f"{icon} <b>{p['name']}</b> ({p['host']})\n   Inbounds: {len(ibs)}\n   API: {'Token' if p.get('api_token') else 'Login'}\n\n"
+            text += f"{icon} <b>{escape(p['name'])}</b> (<code>{p['host']}</code>)\n   Inbounds: {len(ibs)}\n   API: {'Token' if p.get('api_token') else 'Login'}\n\n"
 
     await message.answer(text, parse_mode="HTML")
 
@@ -131,7 +132,7 @@ async def panel_cfg(callback: CallbackQuery):
     pid = int(callback.data.split("_")[-1])
     p = await get_panel(pid)
     if not p: return
-    text = f"⚙️ <b>Сервер: {p['name']}</b>\nIP: <code>{p['host']}</code>\n\n<b>Конфиги в базе:</b>\n"
+    text = f"⚙️ <b>Сервер: {escape(p['name'])}</b>\nIP: <code>{p['host']}</code>\n\n<b>Конфиги в базе:</b>\n"
     b = InlineKeyboardBuilder()
     ibs = p.get('inbounds', {})
     if not ibs: text += "— нет данных —"
@@ -169,63 +170,70 @@ async def pdel_ib(callback: CallbackQuery):
 async def psync_ibs(callback: CallbackQuery):
     pid = int(callback.data.split("_")[-1])
     p = await get_panel(pid)
-    if not p: return
+    if not p: return await callback.answer("❌ Сервер не найден")
 
-    res = await XUI._get_single(p, "/panel/api/inbounds/list")
-    if not (res and res.get("success") and res.get("obj")):
-        return await callback.answer("❌ Ошибка API или данных")
+    await callback.answer("⏳ Синхронизация запущена...")
 
-    ibs, ib_ids, bib_ids = {}, [], []
-    for ib in res["obj"]:
-        iid, prot = str(ib["id"]), str(ib["protocol"]).lower()
-        if prot == "shadowsocks": prot = "ss"
+    try:
+        res = await XUI._get_single(p, "/panel/api/inbounds/list")
+        if not (res and res.get("success") and res.get("obj")):
+            msg = res.get("msg") if res else "Connection Error"
+            return await callback.message.answer(f"❌ Ошибка 3X-UI на сервере {p['name']}: {msg}")
 
-        stream = ib.get("streamSettings", {})
-        cfg = {
-            "label": ib.get("remark", f"Inbound {iid}"),
-            "protocol": prot, "port": ib.get("port"),
-            "network": stream.get("network", "tcp"), "security": stream.get("security", "none")
-        }
+        ibs, ib_ids, bib_ids = {}, [], []
+        for ib in res["obj"]:
+            iid, prot = str(ib["id"]), str(ib["protocol"]).lower()
+            if prot == "shadowsocks": prot = "ss"
 
-        # Парсинг транспорта
-        net = cfg["network"]
-        if net == "xhttp":
-            xs = stream.get("xhttpSettings", {})
-            cfg.update({"path": xs.get("path", "/"), "xhttp_mode": xs.get("mode", "auto"), "ws_host": xs.get("host", "")})
-        elif net == "ws":
-            ws = stream.get("wsSettings", {})
-            cfg.update({"path": ws.get("path", "/"), "ws_host": ws.get("headers", {}).get("Host", "")})
-        elif net == "grpc":
-            gs = stream.get("grpcSettings", {})
-            cfg.update({"grpc_service": gs.get("serviceName", "")})
+            stream = ib.get("streamSettings", {})
+            cfg = {
+                "label": ib.get("remark", f"Inbound {iid}"),
+                "protocol": prot, "port": ib.get("port"),
+                "network": stream.get("network", "tcp"), "security": stream.get("security", "none")
+            }
 
-        # Парсинг безопасности
-        if cfg["security"] == "reality":
-            rs = stream.get("realitySettings", {})
-            cfg.update({
-                "public_key": rs.get("settings", {}).get("publicKey", ""),
-                "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"),
-                "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
-                "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                "spiderX": rs.get("settings", {}).get("spiderX", "/")
-            })
-            cls = ib.get("settings", {}).get("clients", [])
-            cfg["flow"] = cls[0].get("flow", "") if cls else ""
-        elif cfg["security"] == "tls":
-            ts = stream.get("tlsSettings", {})
-            cfg.update({"sni": ts.get("serverName", "")})
+            # Парсинг транспорта
+            net = cfg["network"]
+            if net == "xhttp":
+                xs = stream.get("xhttpSettings", {})
+                cfg.update({"path": xs.get("path", "/"), "xhttp_mode": xs.get("mode", "auto"), "ws_host": xs.get("host", "")})
+            elif net == "ws":
+                ws = stream.get("wsSettings", {})
+                cfg.update({"path": ws.get("path", "/"), "ws_host": ws.get("headers", {}).get("Host", "")})
+            elif net == "grpc":
+                gs = stream.get("grpcSettings", {})
+                cfg.update({"grpc_service": gs.get("serviceName", "")})
 
-        if prot == "ss":
-            s_set = ib.get("settings", {})
-            cfg.update({"method": s_set.get("method"), "password": s_set.get("password")})
+            # Парсинг безопасности
+            if cfg["security"] == "reality":
+                rs = stream.get("realitySettings", {})
+                cfg.update({
+                    "public_key": rs.get("settings", {}).get("publicKey", ""),
+                    "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"),
+                    "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
+                    "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
+                    "spiderX": rs.get("settings", {}).get("spiderX", "/")
+                })
+                cls = ib.get("settings", {}).get("clients", [])
+                cfg["flow"] = cls[0].get("flow", "") if cls else ""
+            elif cfg["security"] == "tls":
+                ts = stream.get("tlsSettings", {})
+                cfg.update({"sni": ts.get("serverName", "")})
 
-        ibs[iid] = cfg
-        if prot == "vless": ib_ids.append(iid)
-        bib_ids.append(iid)
+            if prot == "ss":
+                s_set = ib.get("settings", {})
+                cfg.update({"method": s_set.get("method"), "password": s_set.get("password")})
 
-    await update_panel_inbounds(pid, ib_ids, bib_ids, ibs)
-    await callback.answer(f"✅ Синхронизировано {len(ibs)} конфигов")
-    await panel_cfg(callback)
+            ibs[iid] = cfg
+            if prot == "vless": ib_ids.append(iid)
+            bib_ids.append(iid)
+
+        await update_panel_inbounds(pid, ib_ids, bib_ids, ibs)
+        await callback.message.answer(f"✅ Успешно! Синхронизировано {len(ibs)} конфигов на сервере {p['name']}")
+        await panel_cfg(callback)
+    except Exception as e:
+        logger.exception(f"Sync error for {p['name']}")
+        await callback.message.answer(f"❌ Фатальная ошибка при синхронизации {p['name']}: {e}")
 
 # ── Добавление серверов ──
 
@@ -247,7 +255,6 @@ async def process_server_name(message: Message, state: FSMContext):
 async def process_server_host(message: Message, state: FSMContext):
     import re
     raw = message.text.strip().lower()
-    # Удаляем http://, https://, пути и порты
     host = re.sub(r'^https?://', '', raw).split('/')[0].split(':')[0].strip('.')
     if not host:
         return await message.answer("❌ Неверный хост. Введи IP или домен:")
@@ -320,7 +327,7 @@ async def process_server_finish(message: Message, state: FSMContext):
             ok = await XUI._login(sess, panel_test)
     if ok:
         pid = await add_panel(data['name'], data['host'], data['port'], data['path'], data.get('login', ""), data.get('password', ""), data['server_host'], data.get('api_token', ""))
-        await message.answer(f"✅ Сервер добавлен! ID: {pid}. Теперь добавь конфиг через /addinbound.")
+        await message.answer(f"✅ Сервер добавлен! ID: {pid}. Теперь обнови конфиги кнопкой в меню серверов.")
     else: await message.answer("❌ Ошибка подключения.")
     await state.clear()
 
@@ -358,15 +365,11 @@ async def process_inbound_json(message: Message, state: FSMContext):
             await message.answer("❌ Ошибка: В JSON не найден ID/Tag или протокол.")
             return
 
-        # Пытаемся найти реальный числовой ID если нам дали тег
         data = await state.get_data()
         panel = await get_panel(data['panel_id'])
 
         real_id = await XUI.get_real_inbound_id(panel, raw_iid)
         iid = str(real_id) if real_id else str(raw_iid)
-
-        if not real_id:
-            logger.warning(f"Could not find numeric ID for inbound {raw_iid} on {panel['name']}. Using as is.")
 
         stream = inbound.get("streamSettings", {})
         cfg = {
@@ -475,7 +478,7 @@ async def cmd_userinfo(message: Message):
     traffic = await XUI.get_client_traffic(f"user_{uid}")
     status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
     sub_url = XUI.make_sub_url(u['sub_id'])
-    text = f"👤 {u['full_name']} (@{u['username']})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
+    text = f"👤 {escape(u['full_name'])} (@{u['username']})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
     if traffic: text += f"\nТрафик (панель): {fmt_bytes(traffic['total'])}"
     text += f"\n🔗 Подписка: <code>{sub_url}</code>"
     await message.answer(text, parse_mode="HTML")
@@ -535,7 +538,7 @@ async def adm_users(callback: CallbackQuery):
     lines = [f"👥 <b>Пользователи ({len(users)}):</b>\n"]
     for u in users[:40]:
         status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
-        lines.append(f"{status} <code>{u['tg_id']}</code> {u.get('full_name')[:18]}\n   {u['balance']:.1f}₽ | {fmt_bytes(u.get('total_traffic_bytes') or 0)}")
+        lines.append(f"{status} <code>{u['tg_id']}</code> {escape(u.get('full_name')[:18])}\n   {u['balance']:.1f}₽ | {fmt_bytes(u.get('total_traffic_bytes') or 0)}")
     b = InlineKeyboardBuilder()
     b.button(text="◀️ Назад", callback_data="adm_back")
     await callback.message.edit_text("\n".join(lines), parse_mode="HTML", reply_markup=b.as_markup())
@@ -580,7 +583,7 @@ async def cb_adm_userinfo_btn(callback: CallbackQuery):
     u = await get_user(uid)
     if not u: return await callback.answer("Не найден")
     status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
-    text = f"👤 {u['full_name']}\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽"
+    text = f"👤 {escape(u['full_name'])}\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽"
     b = InlineKeyboardBuilder(); b.button(text="💳 +50 ₽", callback_data=f"adm_gift_{uid}"); b.button(text="🚫 Бан", callback_data=f"adm_ban_{uid}"); b.button(text="◀️ Назад", callback_data=f"adm_card_{uid}"); b.adjust(2, 1)
     await callback.message.edit_text(text, reply_markup=b.as_markup()); await callback.answer()
 

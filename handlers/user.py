@@ -83,8 +83,10 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     sub_url = XUI.make_sub_url(user['sub_id'])
     bal = user["balance"]
 
+    from html import escape
+    first_name = escape(message.from_user.first_name)
     await message.answer(
-        f"👋 Привет, <b>{message.from_user.first_name}</b>!\n\n"
+        f"👋 Привет, <b>{first_name}</b>!\n\n"
         f"🛡 <b>Dobrinya VPN</b>\n"
         f"Тариф: <b>{PRICE_PER_GB} ₽/ГБ</b>\n"
         f"Кредит: <b>~{_CREDIT_GB:.0f} ГБ</b> бесплатно\n\n"
@@ -127,9 +129,11 @@ async def _show_account(uid: int, message: Message, edit: bool):
     b.button(text="◀️ В меню", callback_data="back_main")
     b.adjust(1)
 
+    from html import escape
+    full_name = escape(user.get('full_name') or '—')
     fn = message.edit_text if edit else message.answer
     await fn(
-        f"👤 <b>Мой аккаунт</b>\n\n"
+        f"👤 <b>Аккаунт: {full_name}</b>\n\n"
         f"Статус: {status}\n"
         f"💰 Баланс: <b>{bal:.2f} ₽</b>\n"
         f"📦 Использовано: <b>{fmt_bytes(total)}</b>\n\n"
