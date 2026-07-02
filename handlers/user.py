@@ -37,6 +37,7 @@ _CREDIT_GB  = _CREDIT_ABS / PRICE_PER_GB
 
 class UserStates(StatesGroup):
     waiting_promo = State()
+    waiting_topup_amount = State()
 
 async def _ensure_user_on_panels(u: dict):
     """Фоновое добавление пользователя на все панели 3X-UI."""
@@ -154,15 +155,29 @@ async def cb_traffic_stats(callback: CallbackQuery):
 
 # ── Пополнение (STARS / CRYPTO) ──
 @router.callback_query(F.data == "topup_start")
-async def cb_topup_start(callback: CallbackQuery):
-    await callback.message.edit_text(f"💳 <b>Пополнение баланса</b>\n\nВыбери сумму:", parse_mode="HTML", reply_markup=kb_topup_amount())
+async def cb_topup_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(UserStates.waiting_topup_amount)
+    await callback.message.edit_text(
+        f"💳 <b>Пополнение баланса</b>\n\n"
+        f"Введи сумму пополнения в рублях (от 30 до 10000):",
+        parse_mode="HTML", reply_markup=kb_back()
+    )
     await callback.answer()
 
-@router.callback_query(F.data.startswith("topup_amount_"))
-async def cb_topup_amount(callback: CallbackQuery):
-    rub = int(callback.data.split("_")[-1])
-    await callback.message.edit_text(f"💳 <b>Пополнение: {rub} ₽</b>\n\nСпособ оплаты:", parse_mode="HTML", reply_markup=kb_topup_method(rub))
-    await callback.answer()
+@router.message(UserStates.waiting_topup_amount)
+async def handle_topup_amount(message: Message, state: FSMContext):
+    try:
+        rub = int(message.text.strip())
+        if not (30 <= rub <= 10000):
+            return await message.answer("❌ Сумма должна быть от 30 до 10000 ₽. Попробуй ещё раз:")
+
+        await state.clear()
+        await message.answer(
+            f"💳 <b>Пополнение: {rub} ₽</b>\n\nСпособ оплаты:",
+            parse_mode="HTML", reply_markup=kb_topup_method(rub)
+        )
+    except ValueError:
+        await message.answer("❌ Введи сумму числом (например, 100):")
 
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def cb_pay_stars(callback: CallbackQuery, bot: Bot):

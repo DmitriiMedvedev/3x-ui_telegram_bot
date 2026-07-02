@@ -112,8 +112,11 @@ async def get_user(tg_id: int) -> dict | None:
 
 async def update_user(tg_id: int, **fields):
     if not fields: return
-    sets = ", ".join(f"{k}=?" for k in fields)
-    vals = list(fields.values()) + [tg_id]
+    allowed = {"username", "full_name", "balance", "vless_uuid", "sub_id", "configs_all", "sub_url", "xui_enabled", "notified_low_balance", "is_banned", "last_traffic_bytes", "total_traffic_bytes"}
+    filtered = {k: v for k, v in fields.items() if k in allowed}
+    if not filtered: return
+    sets = ", ".join(f"{k}=?" for k in filtered)
+    vals = list(filtered.values()) + [tg_id]
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(f"UPDATE users SET {sets} WHERE tg_id=?", vals)
         await db.commit()
