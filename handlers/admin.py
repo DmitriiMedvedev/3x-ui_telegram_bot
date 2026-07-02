@@ -185,7 +185,7 @@ async def psync_ibs(callback: CallbackQuery):
             iid, prot = str(ib["id"]), str(ib["protocol"]).lower()
             if prot == "shadowsocks": prot = "ss"
 
-            stream = ib.get("streamSettings", {})
+            stream = ib.get("streamSettings") or {}
             cfg = {
                 "label": ib.get("remark", f"Inbound {iid}"),
                 "protocol": prot, "port": ib.get("port"),
@@ -195,33 +195,33 @@ async def psync_ibs(callback: CallbackQuery):
             # Парсинг транспорта
             net = cfg["network"]
             if net == "xhttp":
-                xs = stream.get("xhttpSettings", {})
+                xs = stream.get("xhttpSettings") or {}
                 cfg.update({"path": xs.get("path", "/"), "xhttp_mode": xs.get("mode", "auto"), "ws_host": xs.get("host", "")})
             elif net == "ws":
-                ws = stream.get("wsSettings", {})
-                cfg.update({"path": ws.get("path", "/"), "ws_host": ws.get("headers", {}).get("Host", "")})
+                ws = stream.get("wsSettings") or {}
+                cfg.update({"path": ws.get("path", "/"), "ws_host": (ws.get("headers") or {}).get("Host", "")})
             elif net == "grpc":
-                gs = stream.get("grpcSettings", {})
+                gs = stream.get("grpcSettings") or {}
                 cfg.update({"grpc_service": gs.get("serviceName", "")})
 
             # Парсинг безопасности
             if cfg["security"] == "reality":
-                rs = stream.get("realitySettings", {})
+                rs = stream.get("realitySettings") or {}
                 cfg.update({
-                    "public_key": rs.get("settings", {}).get("publicKey", ""),
-                    "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"),
+                    "public_key": (rs.get("settings") or {}).get("publicKey", ""),
+                    "fingerprint": (rs.get("settings") or {}).get("fingerprint", "chrome"),
                     "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
                     "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                    "spiderX": rs.get("settings", {}).get("spiderX", "/")
+                    "spiderX": (rs.get("settings") or {}).get("spiderX", "/")
                 })
-                cls = ib.get("settings", {}).get("clients", [])
+                cls = (ib.get("settings") or {}).get("clients", [])
                 cfg["flow"] = cls[0].get("flow", "") if cls else ""
             elif cfg["security"] == "tls":
-                ts = stream.get("tlsSettings", {})
+                ts = stream.get("tlsSettings") or {}
                 cfg.update({"sni": ts.get("serverName", "")})
 
             if prot == "ss":
-                s_set = ib.get("settings", {})
+                s_set = ib.get("settings") or {}
                 cfg.update({"method": s_set.get("method"), "password": s_set.get("password")})
 
             ibs[iid] = cfg
@@ -371,7 +371,7 @@ async def process_inbound_json(message: Message, state: FSMContext):
         real_id = await XUI.get_real_inbound_id(panel, raw_iid)
         iid = str(real_id) if real_id else str(raw_iid)
 
-        stream = inbound.get("streamSettings", {})
+        stream = inbound.get("streamSettings") or {}
         cfg = {
             "label": inbound.get("remark", f"Inbound {iid}"),
             "protocol": prot, "port": inbound.get("port"),
@@ -379,32 +379,32 @@ async def process_inbound_json(message: Message, state: FSMContext):
         }
         net = cfg["network"]
         if net == "xhttp":
-            xs = stream.get("xhttpSettings", {})
+            xs = stream.get("xhttpSettings") or {}
             cfg.update({"path": xs.get("path", "/"), "xhttp_mode": xs.get("mode", "auto"), "ws_host": xs.get("host", "")})
         elif net == "ws":
-            ws = stream.get("wsSettings", {})
-            cfg.update({"path": ws.get("path", "/"), "ws_host": ws.get("headers", {}).get("Host", "")})
+            ws = stream.get("wsSettings") or {}
+            cfg.update({"path": ws.get("path", "/"), "ws_host": (ws.get("headers") or {}).get("Host", "")})
         elif net == "grpc":
-            gs = stream.get("grpcSettings", {})
+            gs = stream.get("grpcSettings") or {}
             cfg.update({"grpc_service": gs.get("serviceName", "")})
 
         if cfg["security"] == "reality":
-            rs = stream.get("realitySettings", {})
+            rs = stream.get("realitySettings") or {}
             cfg.update({
-                "public_key": rs.get("settings", {}).get("publicKey", ""),
-                "fingerprint": rs.get("settings", {}).get("fingerprint", "chrome"),
+                "public_key": (rs.get("settings") or {}).get("publicKey", ""),
+                "fingerprint": (rs.get("settings") or {}).get("fingerprint", "chrome"),
                 "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
                 "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                "spiderX": rs.get("settings", {}).get("spiderX", "/")
+                "spiderX": (rs.get("settings") or {}).get("spiderX", "/")
             })
-            cls = inbound.get("settings", {}).get("clients", [])
+            cls = (inbound.get("settings") or {}).get("clients", [])
             cfg["flow"] = cls[0].get("flow", "") if cls else ""
         elif cfg["security"] == "tls":
-            ts = stream.get("tlsSettings", {})
+            ts = stream.get("tlsSettings") or {}
             cfg.update({"sni": ts.get("serverName", "")})
 
         if prot == "ss":
-            s_set = inbound.get("settings", {})
+            s_set = inbound.get("settings") or {}
             cfg.update({"method": s_set.get("method"), "password": s_set.get("password")})
 
         inbounds, ib_ids, bib_ids = panel.get('inbounds', {}), panel.get('inbound_ids', []), panel.get('billing_inbound_ids', [])
