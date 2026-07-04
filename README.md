@@ -18,7 +18,7 @@
 ### 1. Подготовка системы
 Рекомендуется использовать Python 3.12 или выше.
 ```bash
-git clone https://github.com/ваше-репо/dobrinya_bot
+git clone https://github.com/DmitriiMedvedev/dobrinya_bot
 cd dobrinya_bot/3x-ui_telegram_bot
 python3 -m venv venv
 source venv/bin/activate
