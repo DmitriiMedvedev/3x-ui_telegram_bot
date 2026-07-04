@@ -51,7 +51,7 @@ async def init_db():
         for table, cols in migrations.items():
             for col, defn in cols:
                 try: await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
-                except: pass
+                except Exception as e: logger.debug(f"Migration column already exists: {e}")
 
         # Служебные таблицы
         await db.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, tg_id INTEGER NOT NULL, amount REAL NOT NULL, method TEXT NOT NULL, comment TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))")
@@ -118,7 +118,7 @@ async def update_user(tg_id: int, **fields):
     sets = ", ".join(f"{k}=?" for k in filtered)
     vals = list(filtered.values()) + [tg_id]
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(f"UPDATE users SET {sets} WHERE tg_id=?", vals)
+        await db.execute(f"UPDATE users SET {sets} WHERE tg_id=?", vals)  # nosec B608
         await db.commit()
 
 async def add_balance(tg_id: int, delta: float):

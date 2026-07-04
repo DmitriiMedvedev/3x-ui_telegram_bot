@@ -60,7 +60,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         try:
             rid = int(args[1][4:])
             if rid != uid: referred_by = rid
-        except: pass
+        except Exception as e: logging.getLogger(__name__).debug(f"Invalid referral id: {e}")
 
     user, is_new = await get_or_create_user(
         uid, message.from_user.username or "", message.from_user.full_name or "", referred_by=referred_by
@@ -69,13 +69,13 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     if is_new and referred_by:
         try:
             await bot.send_message(referred_by, f"👥 По твоей ссылке зарегистрировался новый пользователь!", parse_mode="HTML")
-        except: pass
+        except Exception as e: logging.getLogger(__name__).warning(f"Failed to notify referrer: {e}")
 
     if is_new:
         # Уведомление админам
         for admin_id in ADMIN_IDS:
             try: await bot.send_message(admin_id, f"🆕 Новый юзер: {uid}", reply_markup=kb_new_user(uid))
-            except: pass
+            except Exception as e: logging.getLogger(__name__).warning(f"Failed to notify admin about new user: {e}")
 
     # Запускаем синхронизацию с панелями в фоне, не заставляя юзера ждать
     asyncio.create_task(_ensure_user_on_panels(user))
