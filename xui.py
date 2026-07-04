@@ -321,11 +321,11 @@ def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) 
     params = {"type": network, "security": sec}
     if sec == "reality":
         params.update({
-            "pbk": cfg.get("public_key", ""),
-            "fp": cfg.get("fingerprint", "chrome"),
-            "sni": cfg.get("sni", ""),
-            "sid": cfg.get("short_id", ""),
-            "spx": cfg.get("spiderX", "/")
+            "pbk": cfg.get("public_key") or "",
+            "fp": cfg.get("fingerprint") or "chrome",
+            "sni": cfg.get("sni") or "",
+            "sid": cfg.get("short_id") or "",
+            "spx": cfg.get("spiderX") or "/"
         })
         if cfg.get("flow"): params["flow"] = cfg["flow"]
     elif sec == "tls":

@@ -16,6 +16,11 @@ from aiohttp import web
 
 from config import DB_PATH
 
+# Standard User-Agent to avoid blocks
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -59,27 +64,34 @@ def get_active_panels() -> list[dict]:
 
 async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: str) -> str:
     """Запрашивает нативную подписку с конкретной панели, перебирая варианты URL."""
-    host = panel.get('host', "").strip().strip(".")
-    if not host: return ""
+    # Перебираем как IP/хост API, так и публичный host сервера
+    hosts = [panel.get('host', "").strip().strip(".")]
+    if panel.get('server_host'):
+        hosts.append(panel.get('server_host').strip())
 
     # Варианты путей
     base_paths = ["", panel.get('path', "")]
     sub_paths = ["/sub", "/sub/v2"]
 
-    for proto in ["https", "http"]:
-        for bp in base_paths:
-            bp = bp.strip("/")
-            if bp: bp = "/" + bp
-            for sp in sub_paths:
-                url = f"{proto}://{host}:{panel['port']}{bp}{sp}/{sub_id}"
-                try:
-                    async with session.get(url, timeout=2.5, ssl=False) as resp:
-                        if resp.status == 200:
-                            text = await resp.text()
-                            if text and len(text) > 10:
-                                logger.info(f"Success fetching sub from {panel['name']} via {url}")
-                                return text
-                except: pass
+    for host in hosts:
+        if not host: continue
+        for proto in ["https", "http"]:
+            for bp in base_paths:
+                bp = bp.strip("/")
+                if bp: bp = "/" + bp
+                for sp in sub_paths:
+                    url = f"{proto}://{host}:{panel['port']}{bp}{sp}/{sub_id}"
+                    try:
+                        async with session.get(url, timeout=3.0, ssl=False) as resp:
+                            if resp.status == 200:
+                                text = await resp.text()
+                                if text and len(text) > 10:
+                                    logger.info(f"Success fetching sub from {panel['name']} via {url}")
+                                    return text
+                            else:
+                                logger.debug(f"Sub fetch 404/Error from {panel['name']} via {url}: {resp.status}")
+                    except Exception as e:
+                        logger.debug(f"Sub fetch exception from {panel['name']} via {url}: {e}")
     return ""
 
 def decode_sub(content: str) -> list[str]:
@@ -110,11 +122,11 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
             params = {"type": net, "security": sec}
             if sec == "reality":
                 params.update({
-                    "pbk": cfg.get("public_key", ""),
-                    "fp": cfg.get("fingerprint", "chrome"),
-                    "sni": cfg.get("sni", ""),
-                    "sid": cfg.get("short_id", ""),
-                    "spx": cfg.get("spiderX", "/")
+                    "pbk": cfg.get("public_key") or "",
+                    "fp": cfg.get("fingerprint") or "chrome",
+                    "sni": cfg.get("sni") or "",
+                    "sid": cfg.get("short_id") or "",
+                    "spx": cfg.get("spiderX") or "/"
                 })
                 if cfg.get("flow"): params["flow"] = cfg["flow"]
             elif sec == "tls":
@@ -151,9 +163,11 @@ async def handle_sub(request: web.Request) -> web.Response:
         # 1. Пытаемся получить нативные ссылки (Proxy mode)
         diag_log = [f"Sub Request: {sub_id}", f"User: {email}", f"UUID: {u_uuid}", f"Panels count: {len(panels)}"]
 
-        async with aiohttp.ClientSession() as session:
-            for p in panels:
-                res = await fetch_panel_sub(session, p, user['sub_id'])
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
+            tasks = [fetch_panel_sub(session, p, user['sub_id']) for p in panels]
+            results = await asyncio.gather(*tasks)
+            for i, res in enumerate(results):
+                p = panels[i]
                 if res:
                     links = decode_sub(res)
                     all_links.extend(links)

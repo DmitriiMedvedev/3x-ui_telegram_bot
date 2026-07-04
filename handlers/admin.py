@@ -207,12 +207,13 @@ async def psync_ibs(callback: CallbackQuery):
             # Парсинг безопасности
             if cfg["security"] == "reality":
                 rs = stream.get("realitySettings") or {}
+                r_set = rs.get("settings") or {}
                 cfg.update({
-                    "public_key": (rs.get("settings") or {}).get("publicKey", ""),
-                    "fingerprint": (rs.get("settings") or {}).get("fingerprint", "chrome"),
+                    "public_key": r_set.get("publicKey") or "",
+                    "fingerprint": r_set.get("fingerprint") or "chrome",
                     "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
                     "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                    "spiderX": (rs.get("settings") or {}).get("spiderX", "/")
+                    "spiderX": r_set.get("spiderX") or "/"
                 })
                 cls = (ib.get("settings") or {}).get("clients", [])
                 cfg["flow"] = cls[0].get("flow", "") if cls else ""
@@ -390,12 +391,13 @@ async def process_inbound_json(message: Message, state: FSMContext):
 
         if cfg["security"] == "reality":
             rs = stream.get("realitySettings") or {}
+            r_set = rs.get("settings") or {}
             cfg.update({
-                "public_key": (rs.get("settings") or {}).get("publicKey", ""),
-                "fingerprint": (rs.get("settings") or {}).get("fingerprint", "chrome"),
+                "public_key": r_set.get("publicKey") or "",
+                "fingerprint": r_set.get("fingerprint") or "chrome",
                 "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
                 "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                "spiderX": (rs.get("settings") or {}).get("spiderX", "/")
+                "spiderX": r_set.get("spiderX") or "/"
             })
             cls = (inbound.get("settings") or {}).get("clients", [])
             cfg["flow"] = cls[0].get("flow", "") if cls else ""
