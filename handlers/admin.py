@@ -203,6 +203,16 @@ async def psync_ibs(callback: CallbackQuery):
             elif net == "grpc":
                 gs = stream.get("grpcSettings") or {}
                 cfg.update({"grpc_service": gs.get("serviceName", "")})
+            elif net == "tcp":
+                ts = stream.get("tcpSettings") or {}
+                hdr = ts.get("header") or {}
+                if hdr.get("type") == "http":
+                    cfg.update({"type": "http"})
+                    req = (hdr.get("request") or {})
+                    paths = req.get("path", ["/"])
+                    cfg.update({"path": paths[0] if paths else "/"})
+                    hosts = req.get("headers", {}).get("Host", [""])
+                    if hosts: cfg.update({"ws_host": hosts[0]})
 
             # Парсинг безопасности
             if cfg["security"] == "reality":
@@ -220,6 +230,8 @@ async def psync_ibs(callback: CallbackQuery):
             elif cfg["security"] == "tls":
                 ts = stream.get("tlsSettings") or {}
                 cfg.update({"sni": ts.get("serverName", "")})
+                cls = (ib.get("settings") or {}).get("clients", [])
+                cfg["flow"] = cls[0].get("flow", "") if cls else ""
 
             if prot == "ss":
                 s_set = ib.get("settings") or {}
@@ -388,6 +400,16 @@ async def process_inbound_json(message: Message, state: FSMContext):
         elif net == "grpc":
             gs = stream.get("grpcSettings") or {}
             cfg.update({"grpc_service": gs.get("serviceName", "")})
+        elif net == "tcp":
+            ts = stream.get("tcpSettings") or {}
+            hdr = ts.get("header") or {}
+            if hdr.get("type") == "http":
+                cfg.update({"type": "http"})
+                req = (hdr.get("request") or {})
+                paths = req.get("path", ["/"])
+                cfg.update({"path": paths[0] if paths else "/"})
+                hosts = req.get("headers", {}).get("Host", [""])
+                if hosts: cfg.update({"ws_host": hosts[0]})
 
         if cfg["security"] == "reality":
             rs = stream.get("realitySettings") or {}
@@ -404,6 +426,8 @@ async def process_inbound_json(message: Message, state: FSMContext):
         elif cfg["security"] == "tls":
             ts = stream.get("tlsSettings") or {}
             cfg.update({"sni": ts.get("serverName", "")})
+            cls = (inbound.get("settings") or {}).get("clients", [])
+            cfg["flow"] = cls[0].get("flow", "") if cls else ""
 
         if prot == "ss":
             s_set = inbound.get("settings") or {}

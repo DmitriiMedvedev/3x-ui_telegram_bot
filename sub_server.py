@@ -73,6 +73,11 @@ async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: s
     base_paths = ["", panel.get('path', "")]
     sub_paths = ["/sub", "/sub/v2"]
 
+    # If panel has API Token, use it as fallback auth for sub endpoint if panel restricts it
+    headers = dict(session._default_headers) if session._default_headers else {}
+    if panel.get("api_token"):
+        headers["Authorization"] = f"Bearer {panel['api_token']}"
+
     for host in hosts:
         if not host: continue
         for proto in ["https", "http"]:
@@ -82,7 +87,7 @@ async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: s
                 for sp in sub_paths:
                     url = f"{proto}://{host}:{panel['port']}{bp}{sp}/{sub_id}"
                     try:
-                        async with session.get(url, timeout=3.0, ssl=False) as resp:
+                        async with session.get(url, headers=headers, timeout=3.0, ssl=False) as resp:
                             if resp.status == 200:
                                 text = await resp.text()
                                 if text and len(text) > 10:
@@ -122,23 +127,35 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
             params = {"type": net, "security": sec}
             if sec == "reality":
                 params.update({
-                    "pbk": cfg.get("public_key") or "",
-                    "fp": cfg.get("fingerprint") or "chrome",
-                    "sni": cfg.get("sni") or "",
-                    "sid": cfg.get("short_id") or "",
-                    "spx": cfg.get("spiderX") or "/"
+                    "pbk": cfg.get("public_key", ""),
+                    "fp": cfg.get("fingerprint", "chrome"),
+                    "sni": cfg.get("sni", ""),
+                    "sid": cfg.get("short_id", ""),
+                    "spx": cfg.get("spiderX", "/")
                 })
                 if cfg.get("flow"): params["flow"] = cfg["flow"]
             elif sec == "tls":
                 params["sni"] = cfg.get("sni", "")
+                if cfg.get("flow"): params["flow"] = cfg["flow"]
+
             if net == "xhttp":
                 params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
                 if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
-            elif net == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
+            elif net == "grpc":
+                params.update({"serviceName": cfg.get("grpc_service", ""), "mode": "gun"})
             elif net == "ws":
                 params["path"] = cfg.get("path", "/")
                 if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
-            query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items() if v)
+            elif net == "tcp":
+                if cfg.get("type") == "http":
+                    params["type"] = "http"
+                    if cfg.get("path"): params["path"] = cfg["path"]
+                    if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
+
+            # Remove empty parameters to clean up the URL
+            params = {k: v for k, v in params.items() if v}
+
+            query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items())
             return f"vless://{u_uuid}@{host}:{port}?{query}#{label}"
         elif prot == "ss":
             m, pwd = cfg.get("method"), cfg.get("password")
