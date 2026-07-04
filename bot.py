@@ -58,8 +58,8 @@ async def _process_crypto_payment(bot: Bot, invoice_id: int,
                 f"🎉 Реферальный бонус <b>+{reward:.2f} ₽</b>!",
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to send referral reward notification: {e}")
 
     # Уведомление пользователю
     fresh_bal = (await get_user(tg_id) or {}).get("balance", amount_rub)
@@ -72,8 +72,8 @@ async def _process_crypto_payment(bot: Bot, invoice_id: int,
             f"💰 Баланс: <b>{fresh_bal:.2f} ₽</b>",
             parse_mode="HTML",
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Failed to send crypto payment notification: {e}")
 
     # Включаем VPN если был отключён из-за баланса
     asyncio.create_task(billing_tick(bot))

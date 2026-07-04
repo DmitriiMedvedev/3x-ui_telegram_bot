@@ -145,8 +145,8 @@ async def billing_tick(bot=None):
                 parse_mode="HTML",
                 reply_markup=_topup_kb(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to send low balance warning: {e}")
 
     # ── Уведомление: отключение −50₽ ─────────────────────────────────────────
     for uid in to_notify:
@@ -159,8 +159,8 @@ async def billing_tick(bot=None):
                 parse_mode="HTML",
                 reply_markup=_topup_kb(),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to send disconnect warning: {e}")
 
     logger.info(
         f"=== Billing tick завершён: списано с {billed}, "

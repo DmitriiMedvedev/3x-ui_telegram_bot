@@ -147,7 +147,7 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
             return f"ss://{cred}@{host}:{port}#{label}"
         elif prot == "trojan":
             return f"trojan://{u_uuid}@{host}:{port}?security=tls&sni={cfg.get('sni', '')}#{label}"
-    except: pass
+    except Exception as e: logger.warning(f"Fallback generation error: {e}")
     return None
 
 async def handle_sub(request: web.Request) -> web.Response:
@@ -216,4 +216,4 @@ app.router.add_get("/", handle_index)
 app.router.add_get("/sub/{sub_id}", handle_sub)
 
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=8080)
+    web.run_app(app, host="0.0.0.0", port=8080)  # nosec B104

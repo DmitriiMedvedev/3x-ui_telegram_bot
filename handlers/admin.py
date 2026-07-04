@@ -4,7 +4,7 @@ handlers/admin.py — Admin panel v17.2 (Robust Inbound Sync + Full UI).
 """
 import asyncio
 import logging
-import random
+import secrets
 import string
 import json
 from datetime import datetime
@@ -299,13 +299,13 @@ async def process_server_login(message: Message, state: FSMContext):
 
 @router.message(AddServerStates.waiting_password)
 async def process_server_password(message: Message, state: FSMContext):
-    await state.update_data(password=message.text, api_token="")
+    await state.update_data(password=message.text, api_token="")  # nosec B106
     await state.set_state(AddServerStates.waiting_server_host)
     await message.answer("Публичный IP сервера (для ссылок):")
 
 @router.message(AddServerStates.waiting_api_token)
 async def process_server_api_token(message: Message, state: FSMContext):
-    await state.update_data(api_token=message.text, login="", password="")
+    await state.update_data(api_token=message.text, login="", password="")  # nosec B106
     await state.set_state(AddServerStates.waiting_server_host)
     await message.answer("Публичный IP сервера (для ссылок):")
 
@@ -480,7 +480,7 @@ async def cmd_userinfo(message: Message):
     traffic = await XUI.get_client_traffic(f"user_{uid}")
     status = "✅" if u.get("balance", 0) > CREDIT_LIMIT_RUB else "❌"
     sub_url = XUI.make_sub_url(u['sub_id'])
-    text = f"👤 {escape(u['full_name'])} (@{u['username']})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
+    text = f"👤 {escape(u['full_name'])} (@{escape(u['username'])})\nID: {uid}\nСтатус: {status}\nБаланс: {u['balance']:.2f} ₽\nТрафик (БД): {fmt_bytes(u['total_traffic_bytes'])}"
     if traffic: text += f"\nТрафик (панель): {fmt_bytes(traffic['total'])}"
     text += f"\n🔗 Подписка: <code>{sub_url}</code>"
     await message.answer(text, parse_mode="HTML")
@@ -519,7 +519,7 @@ async def cmd_broadcast(message: Message, bot: Bot):
     users = await get_all_users()
     for u in users:
         try: await bot.send_message(u["tg_id"], f"📢 {text}"); await asyncio.sleep(0.05)
-        except: pass
+        except Exception as e: logging.getLogger(__name__).warning(f"Failed to send broadcast: {e}")
     await message.answer("✅")
 
 @router.message(Command("addpromo"))
@@ -527,7 +527,7 @@ async def cmd_addpromo(message: Message):
     if not is_admin(message.from_user.id): return
     p = message.text.split()
     if len(p) != 4: return await message.answer("Формат: /addpromo КОД РУБ USES")
-    code = p[1].upper() if p[1] != "_" else "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    code = p[1].upper() if p[1] != "_" else "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
     await create_promo(code, float(p[2]), int(p[3]), message.from_user.id)
     await message.answer(f"✅ Промокод {code} на {p[2]}₽ создан.")
 
@@ -594,7 +594,7 @@ async def cb_adm_gift_btn(callback: CallbackQuery, bot: Bot):
     uid = int(callback.data.split("_")[-1])
     await add_balance(uid, 50.0); await add_transaction(uid, 50.0, "admin_gift", "Gift")
     try: await bot.send_message(uid, "🎁 Начислено 50 ₽!")
-    except: pass
+    except Exception as e: logging.getLogger(__name__).warning(f"Failed to send gift notification: {e}")
     asyncio.create_task(billing_tick(bot))
     await callback.answer("✅ Начислено 50 ₽"); await adm_back(callback)
 
