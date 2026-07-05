@@ -6,10 +6,7 @@ import aiosqlite
 import logging
 import json
 import uuid
-import os
-from datetime import datetime
 
-from config import DB_PATH
 
 logger  = logging.getLogger(__name__)
 
@@ -68,14 +65,18 @@ def _safe_json_list(data) -> list:
     try:
         d = json.loads(data or '[]')
         return [str(x) for x in d] if isinstance(d, list) else []
-    except: return []
+    except Exception as e:
+        logger.warning(f"Exception caught: {e}")
+        return []
 
 def _safe_json_dict(data) -> dict:
     if isinstance(data, dict): return {str(k): v for k, v in data.items()}
     try:
         d = json.loads(data or '{}')
         return {str(k): v for k, v in d.items()} if isinstance(d, dict) else {}
-    except: return {}
+    except Exception as e:
+        logger.warning(f"Exception caught: {e}")
+        return {}
 
 # ── Users ──
 
