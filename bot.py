@@ -8,6 +8,7 @@ Background tasks:
   cryptobot_poller  — Checks paid CryptoBot invoices every 30 seconds
                       (runs only if CRYPTOBOT_TOKEN is set in .env)
 """
+
 import asyncio
 import logging
 
@@ -16,9 +17,15 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, CRYPTOBOT_TOKEN, REFERRAL_PERCENT, PRICE_PER_GB
 from database import (
-    init_db, get_user, add_balance, add_transaction, update_user,
-    add_referral_reward, get_pending_crypto_invoices,
-    mark_crypto_invoice_paid, expire_old_crypto_invoices,
+    init_db,
+    get_user,
+    add_balance,
+    add_transaction,
+    update_user,
+    add_referral_reward,
+    get_pending_crypto_invoices,
+    mark_crypto_invoice_paid,
+    expire_old_crypto_invoices,
 )
 import xui as XUI
 import cryptobot as CryptoBot
@@ -32,16 +39,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def _process_crypto_payment(bot: Bot, invoice_id: int,
-                                  tg_id: int, amount_rub: float):
+async def _process_crypto_payment(
+    bot: Bot, invoice_id: int, tg_id: int, amount_rub: float
+):
     """
     Processes a single paid CryptoBot transaction:
     credits balance, referral rewards, notifies the user.
     """
     await mark_crypto_invoice_paid(invoice_id)
     await add_balance(tg_id, amount_rub)
-    await add_transaction(tg_id, amount_rub, "cryptobot",
-                          f"CryptoBot {amount_rub:.0f} ₽")
+    await add_transaction(
+        tg_id, amount_rub, "cryptobot", f"CryptoBot {amount_rub:.0f} ₽"
+    )
     await update_user(tg_id, notified_low_balance=0)
 
     # Реферальное вознаграждение
@@ -49,8 +58,9 @@ async def _process_crypto_payment(bot: Bot, invoice_id: int,
     if u and (referrer_id := u.get("referred_by")):
         reward = round(amount_rub * REFERRAL_PERCENT, 2)
         await add_balance(referrer_id, reward)
-        await add_transaction(referrer_id, reward, "referral",
-                              f"Реферал {tg_id}: {reward:.2f} ₽")
+        await add_transaction(
+            referrer_id, reward, "referral", f"Реферал {tg_id}: {reward:.2f} ₽"
+        )
         await add_referral_reward(referrer_id, tg_id, reward)
         try:
             await bot.send_message(
@@ -59,7 +69,9 @@ async def _process_crypto_payment(bot: Bot, invoice_id: int,
                 parse_mode="HTML",
             )
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Failed to send referral reward notification: {e}")
+            logging.getLogger(__name__).warning(
+                f"Failed to send referral reward notification: {e}"
+            )
 
     # Уведомление пользователю
     fresh_bal = (await get_user(tg_id) or {}).get("balance", amount_rub)
@@ -73,7 +85,9 @@ async def _process_crypto_payment(bot: Bot, invoice_id: int,
             parse_mode="HTML",
         )
     except Exception as e:
-        logging.getLogger(__name__).warning(f"Failed to send crypto payment notification: {e}")
+        logging.getLogger(__name__).warning(
+            f"Failed to send crypto payment notification: {e}"
+        )
 
     # Включаем VPN если был отключён из-за баланса
     asyncio.create_task(billing_tick(bot))
@@ -96,13 +110,13 @@ async def cryptobot_poller(bot: Bot):
                 continue
 
             invoice_ids = [inv["invoice_id"] for inv in pending]
-            paid        = await CryptoBot.get_paid_invoices(invoice_ids)
+            paid = await CryptoBot.get_paid_invoices(invoice_ids)
 
             # Создаём индекс для быстрого поиска
             pending_by_id = {inv["invoice_id"]: inv for inv in pending}
 
             for paid_inv in paid:
-                iid   = paid_inv["invoice_id"]
+                iid = paid_inv["invoice_id"]
                 local = pending_by_id.get(iid)
                 if not local:
                     continue
@@ -130,12 +144,14 @@ async def main():
 
     if CRYPTOBOT_TOKEN:
         ok_cb = await CryptoBot.check_connection()
-        logger.info(f"CryptoBot: {'✅ доступен' if ok_cb else '⚠️ недоступен — проверь токен'}")
+        logger.info(
+            f"CryptoBot: {'✅ доступен' if ok_cb else '⚠️ недоступен — проверь токен'}"
+        )
     else:
         logger.info("CryptoBot: ⏭ токен не задан, пропускаем")
 
     bot = Bot(token=BOT_TOKEN)
-    dp  = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(admin.router)
     dp.include_router(user.router)

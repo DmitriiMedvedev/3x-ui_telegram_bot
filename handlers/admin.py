@@ -7,8 +7,6 @@ import logging
 import secrets
 import string
 import json
-from datetime import datetime
-from html import escape
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
@@ -17,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import ADMIN_IDS, PRICE_PER_GB, SERVER_COST_RUB, CREDIT_LIMIT_RUB
+from config import ADMIN_IDS, SERVER_COST_RUB, CREDIT_LIMIT_RUB
 from database import (
     get_all_users, get_user, update_user, add_balance,
     add_transaction, get_revenue_stats, create_promo, get_all_promos, add_panel, get_all_panels, update_panel_inbounds, get_panel,
@@ -163,7 +161,7 @@ async def pdel_ib(callback: CallbackQuery):
     ib_ids = [str(x) for x in p.get('inbound_ids', []) if str(x) != iid]
     bib_ids = [str(x) for x in p.get('billing_inbound_ids', []) if str(x) != iid]
     await update_panel_inbounds(pid, ib_ids, bib_ids, ibs)
-    await callback.answer(f"Удален")
+    await callback.answer("Удален")
     await panel_cfg(callback)
 
 @router.callback_query(F.data.startswith("psync_ibs_"))
@@ -281,7 +279,9 @@ async def process_server_port(message: Message, state: FSMContext):
         await state.update_data(port=int(message.text))
         await state.set_state(AddServerStates.waiting_path)
         await message.answer("Путь панели (например, /xui):")
-    except: await message.answer("Числом:")
+    except Exception as e:
+        logger.warning(f"Exception caught: {e}")
+        await message.answer("Числом:")
 
 @router.message(AddServerStates.waiting_path)
 async def process_server_path(message: Message, state: FSMContext):

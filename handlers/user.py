@@ -4,8 +4,6 @@ handlers/user.py — User handlers.
 """
 import asyncio
 import logging
-from datetime import datetime
-from math import ceil
 
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
@@ -17,16 +15,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import (
     ADMIN_IDS, ADMIN_USERNAME, BOT_USERNAME,
     PRICE_PER_GB, CREDIT_LIMIT_RUB,
-    STARS_RUB_NET, REFERRAL_PERCENT,
+    STARS_RUB_NET,
 )
 from database import (
     get_or_create_user, get_user, update_user, add_balance,
     add_transaction, get_promo, promo_already_used, use_promo,
-    add_referral_reward, get_referral_stats, save_crypto_invoice,
+    get_referral_stats, save_crypto_invoice,
 )
 import cryptobot as CryptoBot
 import xui as XUI
-from keyboards import kb_main, kb_back, kb_topup_amount, kb_topup_method, kb_new_user
+from keyboards import kb_main, kb_back, kb_topup_method, kb_new_user
 from billing import billing_tick, fmt_bytes
 
 router = Router()
@@ -68,7 +66,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
     if is_new and referred_by:
         try:
-            await bot.send_message(referred_by, f"👥 По твоей ссылке зарегистрировался новый пользователь!", parse_mode="HTML")
+            await bot.send_message(referred_by, "👥 По твоей ссылке зарегистрировался новый пользователь!", parse_mode="HTML")
         except Exception as e: logging.getLogger(__name__).warning(f"Failed to notify referrer: {e}")
 
     if is_new:
@@ -121,7 +119,7 @@ async def _show_account(uid: int, message: Message, edit: bool):
     asyncio.create_task(_ensure_user_on_panels(user))
 
     bal, total = user["balance"], user.get("total_traffic_bytes") or 0
-    status = f"✅ Активен" if bal > CREDIT_LIMIT_RUB else f"❌ Отключён"
+    status = "✅ Активен" if bal > CREDIT_LIMIT_RUB else "❌ Отключён"
     sub_url = XUI.make_sub_url(user['sub_id'])
 
     b = InlineKeyboardBuilder()
@@ -162,8 +160,8 @@ async def cb_traffic_stats(callback: CallbackQuery):
 async def cb_topup_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.waiting_topup_amount)
     await callback.message.edit_text(
-        f"💳 <b>Пополнение баланса</b>\n\n"
-        f"Введи сумму пополнения в рублях (от 30 до 10000):",
+        "💳 <b>Пополнение баланса</b>\n\n"
+        "Введи сумму пополнения в рублях (от 30 до 10000):",
         parse_mode="HTML", reply_markup=kb_back()
     )
     await callback.answer()

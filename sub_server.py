@@ -41,7 +41,8 @@ def get_user_by_sub(sub_id: str) -> dict | None:
             row = conn.execute("SELECT * FROM users WHERE tg_id=?", (int(sub_id),)).fetchone()
             return dict(row) if row else None
         return None
-    except: return None
+    except Exception as e:
+        logger.warning(f"Exception caught: {e}")
     finally:
         if conn: conn.close()
 
@@ -55,10 +56,14 @@ def get_active_panels() -> list[dict]:
             p = dict(r)
             # Декодируем inbounds из JSON
             try: p['inbounds'] = json.loads(p.get('inbounds') or '{}')
-            except: p['inbounds'] = {}
+            except Exception as e:
+                logger.warning(f"Exception caught: {e}")
+                p["inbounds"] = {}
             res.append(p)
         return res
-    except: return []
+    except Exception as e:
+        logger.warning(f"Exception caught: {e}")
+        return []
     finally:
         if conn: conn.close()
 
@@ -109,7 +114,8 @@ def decode_sub(content: str) -> list[str]:
         if missing_padding: data += '=' * (4 - missing_padding)
         decoded = base64.b64decode(data).decode('utf-8', errors='ignore')
         return [l.strip() for l in decoded.split('\n') if l.strip()]
-    except:
+    except Exception as e:
+        logger.warning(f"Exception caught: {e}")
         # Если не base64, возможно это просто список ссылок
         return [l.strip() for l in content.split('\n') if l.strip() and "://" in l]
 
@@ -218,7 +224,7 @@ async def handle_sub(request: web.Request) -> web.Response:
             headers={
                 "Content-Type": "text/plain; charset=utf-8",
                 "Profile-Title": f"VPN | {user.get('balance',0):.1f} RUB",
-                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire=0"
+                "Subscription-Userinfo": "upload=0; download=0; total=0; expire=0"
             }
         )
     except Exception as e:

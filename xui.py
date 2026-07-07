@@ -2,6 +2,7 @@
 """
 xui.py — Interaction with 3X-UI API v14.1 with multi-panel support.
 """
+
 import json
 import asyncio
 import uuid
@@ -17,10 +18,11 @@ from database import get_all_panels
 
 logger = logging.getLogger(__name__)
 
-_ADD_RETRIES  = 3
+_ADD_RETRIES = 3
 _RETRY_DELAYS = (0.5, 1.5, 3.0)
 
 # ── Session helpers ────────────────────────────────────────────────────────────
+
 
 def _new_session() -> aiohttp.ClientSession:
     """Сессия без SSL-верификации (self-signed на localhost)."""
@@ -30,15 +32,17 @@ def _new_session() -> aiohttp.ClientSession:
         timeout=aiohttp.ClientTimeout(total=20),
     )
 
+
 async def _login(session: aiohttp.ClientSession, panel: Dict) -> bool:
-    host = panel.get('host', "").strip()
-    if not host: return False
+    host = panel.get("host", "").strip()
+    if not host:
+        return False
     base_url = f"https://{host}:{panel['port']}"
-    path = panel['path']
+    path = panel["path"]
     try:
         async with session.post(
             f"{base_url}{path}/login",
-            data={"username": panel['login'], "password": panel['password']},
+            data={"username": panel["login"], "password": panel["password"]},
         ) as r:
             if r.status != 200:
                 logger.error(f"3X-UI login HTTP {r.status} on {panel['name']}")
@@ -57,8 +61,10 @@ async def _login(session: aiohttp.ClientSession, panel: Dict) -> bool:
         logger.error(f"3X-UI login error on {panel['name']}: {e}")
         return False
 
+
 class XUIClient:
     """Контекстный менеджер для батч-операций (использует одну сессию на каждую панель)."""
+
     def __init__(self):
         self.sessions = {}
         self.loggedIn = set()
@@ -82,8 +88,9 @@ class XUIClient:
         if panel_idx not in self.loggedIn:
             return None
         panel = self.panels_list[panel_idx]
-        host = panel.get('host', "").strip()
-        if not host: return None
+        host = panel.get("host", "").strip()
+        if not host:
+            return None
         base_url = f"https://{host}:{panel['port']}"
         headers = {}
         if panel.get("api_token"):
@@ -105,6 +112,7 @@ class XUIClient:
             logger.error(f"XUIClient POST {endpoint} on {panel['name']}: {e}")
         return None
 
+
 async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None:
     async with _new_session() as sess:
         headers = {}
@@ -114,8 +122,9 @@ async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None
             if not await _login(sess, panel):
                 return None
 
-        host = panel.get('host', "").strip()
-        if not host: return None
+        host = panel.get("host", "").strip()
+        if not host:
+            return None
         base_url = f"https://{host}:{panel['port']}"
         try:
             async with sess.post(
@@ -134,6 +143,7 @@ async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None
             logger.error(f"xui POST {endpoint} on {panel['name']}: {e}")
             return None
 
+
 async def _get_single(panel: dict, endpoint: str) -> dict | None:
     async with _new_session() as sess:
         headers = {}
@@ -143,11 +153,14 @@ async def _get_single(panel: dict, endpoint: str) -> dict | None:
             if not await _login(sess, panel):
                 return None
 
-        host = panel.get('host', "").strip()
-        if not host: return None
+        host = panel.get("host", "").strip()
+        if not host:
+            return None
         base_url = f"https://{host}:{panel['port']}"
         try:
-            async with sess.get(f"{base_url}{panel['path']}{endpoint}", headers=headers) as r:
+            async with sess.get(
+                f"{base_url}{panel['path']}{endpoint}", headers=headers
+            ) as r:
                 if r.status == 200:
                     text = await r.text()
                     try:
@@ -161,44 +174,56 @@ async def _get_single(panel: dict, endpoint: str) -> dict | None:
 
 
 def _build_client_obj(
-    client_uuid: str, email: str, sub_id: str, inbound_id: int, panel: dict, exp_ms: int = 0
+    client_uuid: str,
+    email: str,
+    sub_id: str,
+    inbound_id: int,
+    panel: dict,
+    exp_ms: int = 0,
 ) -> dict:
-    cfg = panel.get("inbounds", {}).get(str(inbound_id)) or panel.get("inbounds", {}).get(int(inbound_id)) or {}
+    cfg = (
+        panel.get("inbounds", {}).get(str(inbound_id))
+        or panel.get("inbounds", {}).get(int(inbound_id))
+        or {}
+    )
     return {
-        "id":         client_uuid,
-        "email":      email,
-        "enable":     True,
-        "flow":       cfg.get("flow", ""),
-        "limitIp":    0,
-        "totalGB":    0,
-        "alterId":    0,
-        "tgId":       "",
+        "id": client_uuid,
+        "email": email,
+        "enable": True,
+        "flow": cfg.get("flow", ""),
+        "limitIp": 0,
+        "totalGB": 0,
+        "alterId": 0,
+        "tgId": "",
         "expiryTime": exp_ms,
-        "subId":      sub_id,
+        "subId": sub_id,
     }
+
 
 async def _add_to_inbound(panel: dict, inbound_id: int, client_obj: dict) -> bool:
     # Пытаемся добавить клиента. Если inbound_id не числовой, это может быть проблемой для некоторых панелей.
-    payload = {
-        "id":       str(inbound_id),
-        "settings": json.dumps({"clients": [client_obj]})
-    }
+    payload = {"id": str(inbound_id), "settings": json.dumps({"clients": [client_obj]})}
 
     for attempt in range(_ADD_RETRIES):
         res = await _post_single(panel, "/panel/api/inbounds/addClient", payload)
         if res:
             if res.get("success"):
-                logger.info(f"addClient success: inbound={inbound_id} email={client_obj['email']} on {panel['name']}")
+                logger.info(
+                    f"addClient success: inbound={inbound_id} email={client_obj['email']} on {panel['name']}"
+                )
                 return True
             msg = str(res.get("msg", "")).lower()
             if "already exists" in msg or "duplicate" in msg:
-                logger.info(f"addClient: client already exists inbound={inbound_id} email={client_obj['email']} on {panel['name']}")
+                logger.info(
+                    f"addClient: client already exists inbound={inbound_id} email={client_obj['email']} on {panel['name']}"
+                )
                 return True
             logger.warning(f"addClient failed on {panel['name']}: {res.get('msg')}")
 
         if attempt < _ADD_RETRIES - 1:
             await asyncio.sleep(_RETRY_DELAYS[attempt])
     return False
+
 
 async def get_real_inbound_id(panel: dict, tag_or_port) -> int | None:
     """Находит числовой ID инбаунда по его тегу или порту."""
@@ -207,32 +232,45 @@ async def get_real_inbound_id(panel: dict, tag_or_port) -> int | None:
         return None
 
     for ib in res["obj"]:
-        if str(ib.get("tag")) == str(tag_or_port): return ib.get("id")
-        if str(ib.get("port")) == str(tag_or_port): return ib.get("id")
+        if str(ib.get("tag")) == str(tag_or_port):
+            return ib.get("id")
+        if str(ib.get("port")) == str(tag_or_port):
+            return ib.get("id")
     return None
 
+
 # Adds a client to all panels in the background.
-async def add_client_background(email: str, client_uuid: str, sub_id: str, expire_days: int = 0):
-    exp_ms = int((datetime.now() + timedelta(days=expire_days)).timestamp() * 1000) if expire_days > 0 else 0
+async def add_client_background(
+    email: str, client_uuid: str, sub_id: str, expire_days: int = 0
+):
+    exp_ms = (
+        int((datetime.now() + timedelta(days=expire_days)).timestamp() * 1000)
+        if expire_days > 0
+        else 0
+    )
     panels = await get_all_panels()
     for panel in panels:
         for iid in panel.get("inbound_ids", []):
             obj = _build_client_obj(client_uuid, email, sub_id, iid, panel, exp_ms)
             await _add_to_inbound(panel, iid, obj)
 
+
 # Legacy helper (still used in some places)
 async def add_client(email: str, expire_days: int = 0) -> dict | None:
     client_uuid = str(uuid.uuid4())
-    sub_id      = uuid.uuid4().hex
+    sub_id = uuid.uuid4().hex
     await add_client_background(email, client_uuid, sub_id, expire_days)
     return {
-        "uuid":    client_uuid,
-        "sub_id":  sub_id,
+        "uuid": client_uuid,
+        "sub_id": sub_id,
         "configs": await make_configs(client_uuid, email),
     }
 
+
 # Enables or disables a client in the 3X-UI panel.
-async def toggle_client(email: str, client_uuid: str, enable: bool, sub_id: str = "") -> bool:
+async def toggle_client(
+    email: str, client_uuid: str, enable: bool, sub_id: str = ""
+) -> bool:
     ok_count = 0
     panels = await get_all_panels()
     for panel in panels:
@@ -246,45 +284,83 @@ async def toggle_client(email: str, client_uuid: str, enable: bool, sub_id: str 
             ib_ids = []
             for ib in res["obj"]:
                 cls = json.loads(ib.get("settings", "{}")).get("clients", [])
-                if any(c.get("id") == client_uuid or c.get("email") == email for c in cls):
+                if any(
+                    c.get("id") == client_uuid or c.get("email") == email for c in cls
+                ):
                     ib_ids.append(ib["id"])
 
         for iid in ib_ids:
             cfg = panel.get("inbounds", {}).get(str(iid)) or {}
             client = {
-                "id": client_uuid, "email": email, "enable": enable, "flow": cfg.get("flow", ""),
-                "limitIp": 0, "totalGB": 0, "alterId": 0, "tgId": "", "expiryTime": 0, "subId": sub_id,
+                "id": client_uuid,
+                "email": email,
+                "enable": enable,
+                "flow": cfg.get("flow", ""),
+                "limitIp": 0,
+                "totalGB": 0,
+                "alterId": 0,
+                "tgId": "",
+                "expiryTime": 0,
+                "subId": sub_id,
             }
             payload = {"id": str(iid), "settings": json.dumps({"clients": [client]})}
-            res = await _post_single(panel, f"/panel/api/inbounds/updateClient/{client_uuid}", payload)
-            if res and res.get("success"): ok_count += 1
+            res = await _post_single(
+                panel, f"/panel/api/inbounds/updateClient/{client_uuid}", payload
+            )
+            if res and res.get("success"):
+                ok_count += 1
     return ok_count > 0
 
+
 async def bulk_toggle(clients: list[tuple[str, str, bool, str]]) -> int:
-    if not clients: return 0
+    if not clients:
+        return 0
     ok_count = 0
     try:
         async with XUIClient() as xui:
             for email, client_uuid, enable, sub_id in clients:
                 for idx, panel in enumerate(xui.panels_list):
                     for iid in panel.get("inbound_ids", []):
-                        cfg = panel.get("inbounds", {}).get(str(iid)) or panel.get("inbounds", {}).get(int(iid)) or {}
+                        cfg = (
+                            panel.get("inbounds", {}).get(str(iid))
+                            or panel.get("inbounds", {}).get(int(iid))
+                            or {}
+                        )
                         client = {
-                            "id": client_uuid, "email": email, "enable": enable, "flow": cfg.get("flow", ""),
-                            "limitIp": 0, "totalGB": 0, "alterId": 0, "tgId": "", "expiryTime": 0, "subId": sub_id,
+                            "id": client_uuid,
+                            "email": email,
+                            "enable": enable,
+                            "flow": cfg.get("flow", ""),
+                            "limitIp": 0,
+                            "totalGB": 0,
+                            "alterId": 0,
+                            "tgId": "",
+                            "expiryTime": 0,
+                            "subId": sub_id,
                         }
-                        payload = {"id": str(iid), "settings": json.dumps({"clients": [client]})}
-                        res = await xui.post(idx, f"/panel/api/inbounds/updateClient/{client_uuid}", payload)
-                        if res and res.get("success"): ok_count += 1
-    except Exception as e: logger.error(f"bulk_toggle: {e}")
+                        payload = {
+                            "id": str(iid),
+                            "settings": json.dumps({"clients": [client]}),
+                        }
+                        res = await xui.post(
+                            idx,
+                            f"/panel/api/inbounds/updateClient/{client_uuid}",
+                            payload,
+                        )
+                        if res and res.get("success"):
+                            ok_count += 1
+    except Exception as e:
+        logger.error(f"bulk_toggle: {e}")
     return ok_count
+
 
 async def get_client_traffic(email: str) -> dict | None:
     total_up, total_down, found = 0, 0, False
     panels = await get_all_panels()
     for panel in panels:
         res = await _get_single(panel, f"/panel/api/inbounds/getClientTraffics/{email}")
-        if not (res and res.get("success") and res.get("obj")): continue
+        if not (res and res.get("success") and res.get("obj")):
+            continue
         obj = res["obj"]
         found = True
         if isinstance(obj, list):
@@ -293,77 +369,120 @@ async def get_client_traffic(email: str) -> dict | None:
         else:
             total_up += obj.get("up", 0)
             total_down += obj.get("down", 0)
-    return {"up": total_up, "down": total_down, "total": total_up + total_down} if found else None
+    return (
+        {"up": total_up, "down": total_down, "total": total_up + total_down}
+        if found
+        else None
+    )
+
 
 async def get_traffic() -> dict[str, int] | None:
     result, found_any = {}, False
     panels = await get_all_panels()
     for panel in panels:
-        host = panel.get('host', "").strip()
-        if not host: continue
+        host = panel.get("host", "").strip()
+        if not host:
+            continue
         res = await _get_single(panel, "/panel/api/inbounds/list")
-        if not res or not res.get("success"): continue
+        if not res or not res.get("success"):
+            continue
         found_any = True
         billing_ids = set(map(str, panel.get("billing_inbound_ids", [])))
-        for inbound in (res.get("obj") or []):
-            if str(inbound.get("id")) not in billing_ids: continue
-            for cs in (inbound.get("clientStats") or []):
+        for inbound in res.get("obj") or []:
+            if str(inbound.get("id")) not in billing_ids:
+                continue
+            for cs in inbound.get("clientStats") or []:
                 email = cs.get("email", "")
-                result[email] = result.get(email, 0) + cs.get("up", 0) + cs.get("down", 0)
+                result[email] = (
+                    result.get(email, 0) + cs.get("up", 0) + cs.get("down", 0)
+                )
     return result if found_any else None
+
 
 def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) -> str:
     inbounds = panel.get("inbounds", {})
-    cfg = inbounds.get(str(inbound_id)) or inbounds.get(int(inbound_id)) if str(inbound_id).isdigit() else inbounds.get(str(inbound_id))
-    if not cfg: return ""
-    host, port, network, sec = cfg.get("host") or panel.get("server_host", "127.0.0.1"), cfg.get("port", 443), cfg.get("network", "tcp"), cfg.get("security", "none")
-    label = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-{cfg.get('label', str(inbound_id))}")
+    cfg = (
+        inbounds.get(str(inbound_id)) or inbounds.get(int(inbound_id))
+        if str(inbound_id).isdigit()
+        else inbounds.get(str(inbound_id))
+    )
+    if not cfg:
+        return ""
+    host, port, network, sec = (
+        cfg.get("host") or panel.get("server_host", "127.0.0.1"),
+        cfg.get("port", 443),
+        cfg.get("network", "tcp"),
+        cfg.get("security", "none"),
+    )
+    label = urllib.parse.quote(
+        f"{email}-{panel.get('name', 'Server')}-{cfg.get('label', str(inbound_id))}"
+    )
     params = {"type": network, "security": sec}
     if sec == "reality":
-        params.update({
-            "pbk": cfg.get("public_key") or "",
-            "fp": cfg.get("fingerprint") or "chrome",
-            "sni": cfg.get("sni") or "",
-            "sid": cfg.get("short_id") or "",
-            "spx": cfg.get("spiderX") or "/"
-        })
-        if cfg.get("flow"): params["flow"] = cfg["flow"]
+        params.update(
+            {
+                "pbk": cfg.get("public_key") or "",
+                "fp": cfg.get("fingerprint") or "chrome",
+                "sni": cfg.get("sni") or "",
+                "sid": cfg.get("short_id") or "",
+                "spx": cfg.get("spiderX") or "/",
+            }
+        )
+        if cfg.get("flow"):
+            params["flow"] = cfg["flow"]
     elif sec == "tls":
         params["sni"] = cfg.get("sni", "")
     if network == "xhttp":
-        params.update({"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")})
-        if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
-    elif network == "grpc": params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
+        params.update(
+            {"path": cfg.get("path", "/"), "mode": cfg.get("xhttp_mode", "auto")}
+        )
+        if cfg.get("ws_host"):
+            params["host"] = cfg["ws_host"]
+    elif network == "grpc":
+        params.update({"serviceName": cfg.get("grpc_service", "grpc"), "mode": "gun"})
     elif network == "ws":
         params["path"] = cfg.get("path", "/")
-        if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
-    query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items() if v)
+        if cfg.get("ws_host"):
+            params["host"] = cfg["ws_host"]
+    query = "&".join(
+        f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items() if v
+    )
     return f"vless://{client_uuid}@{host}:{port}?{query}#{label}"
+
 
 def make_ss_link(email: str, panel: dict) -> str:
     import base64
+
     for iid, cfg in panel.get("inbounds", {}).items():
         if str(cfg.get("protocol", "")).lower() in ["ss", "shadowsocks"]:
-            method, password = cfg.get("method", "chacha20-poly1305"), cfg.get("password", "")
+            method, password = cfg.get("method", "chacha20-poly1305"), cfg.get(
+                "password", ""
+            )
             host, port = panel.get("server_host", "127.0.0.1"), cfg.get("port", 8388)
-            if not password: continue
+            if not password:
+                continue
             label = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-SS")
             cred = base64.b64encode(f"{method}:{password}".encode()).decode()
             return f"ss://{cred}@{host}:{port}#{label}"
     return ""
+
 
 async def make_configs(client_uuid: str, email: str) -> str:
     links, panels = [], await get_all_panels()
     for panel in panels:
         for iid in panel.get("inbound_ids", []):
             link = make_vless_link(client_uuid, email, panel, iid)
-            if link: links.append(link)
+            if link:
+                links.append(link)
         ss = make_ss_link(email, panel)
-        if ss: links.append(ss)
+        if ss:
+            links.append(ss)
     return "\n".join(links)
+
 
 def make_sub_url(sub_id: str) -> str:
     return f"{SUB_BASE_URL}/{sub_id}"
+
 
 async def check_connection() -> bool:
     any_success, panels = False, await get_all_panels()
@@ -371,6 +490,8 @@ async def check_connection() -> bool:
         async with _new_session() as sess:
             if panel.get("api_token"):
                 res = await _get_single(panel, "/panel/api/inbounds/list")
-                if res and res.get("success"): any_success = True
-            elif await _login(sess, panel): any_success = True
+                if res and res.get("success"):
+                    any_success = True
+            elif await _login(sess, panel):
+                any_success = True
     return any_success

@@ -16,7 +16,6 @@ import logging
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import PRICE_PER_GB, CREDIT_LIMIT_RUB, WARN_BALANCE_RUB
-from database import get_all_users, update_user, add_balance, get_user
 import xui as XUI
 
 logger = logging.getLogger(__name__)
