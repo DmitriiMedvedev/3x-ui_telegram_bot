@@ -7,7 +7,7 @@ import json
 import asyncio
 import uuid
 import logging
-import urllib.parse
+from urllib.parse import quote
 from datetime import datetime, timedelta
 from typing import Dict
 
@@ -414,7 +414,7 @@ def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) 
         cfg.get("network", "tcp"),
         cfg.get("security", "none"),
     )
-    label = urllib.parse.quote(
+    label = quote(
         f"{email}-{panel.get('name', 'Server')}-{cfg.get('label', str(inbound_id))}"
     )
     params = {"type": network, "security": sec}
@@ -445,7 +445,7 @@ def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) 
         if cfg.get("ws_host"):
             params["host"] = cfg["ws_host"]
     query = "&".join(
-        f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items() if v
+        f"{k}={quote(str(v), safe='')}" for k, v in params.items() if v
     )
     return f"vless://{client_uuid}@{host}:{port}?{query}#{label}"
 
@@ -461,7 +461,7 @@ def make_ss_link(email: str, panel: dict) -> str:
             host, port = panel.get("server_host", "127.0.0.1"), cfg.get("port", 8388)
             if not password:
                 continue
-            label = urllib.parse.quote(f"{email}-{panel.get('name', 'Server')}-SS")
+            label = quote(f"{email}-{panel.get('name', 'Server')}-SS")
             cred = base64.b64encode(f"{method}:{password}".encode()).decode()
             return f"ss://{cred}@{host}:{port}#{label}"
     return ""
