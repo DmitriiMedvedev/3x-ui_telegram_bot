@@ -13,6 +13,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, CRYPTOBOT_TOKEN, REFERRAL_PERCENT, PRICE_PER_GB
@@ -68,7 +69,7 @@ async def _process_crypto_payment(
                 f"🎉 Реферальный бонус <b>+{reward:.2f} ₽</b>!",
                 parse_mode="HTML",
             )
-        except Exception as e:
+        except TelegramAPIError as e:
             logging.getLogger(__name__).warning(
                 f"Failed to send referral reward notification: {e}"
             )
@@ -84,7 +85,7 @@ async def _process_crypto_payment(
             f"💰 Баланс: <b>{fresh_bal:.2f} ₽</b>",
             parse_mode="HTML",
         )
-    except Exception as e:
+    except TelegramAPIError as e:
         logging.getLogger(__name__).warning(
             f"Failed to send crypto payment notification: {e}"
         )
