@@ -200,12 +200,18 @@ def _build_client_obj(
     }
 
 
-async def _add_to_inbound(panel: dict, inbound_id: int, client_obj: dict) -> bool:
+async def _add_to_inbound(
+    xui_client: "XUIClient",
+    panel_idx: int,
+    panel: dict,
+    inbound_id: int,
+    client_obj: dict,
+) -> bool:
     # Пытаемся добавить клиента. Если inbound_id не числовой, это может быть проблемой для некоторых панелей.
     payload = {"id": str(inbound_id), "settings": json.dumps({"clients": [client_obj]})}
 
     for attempt in range(_ADD_RETRIES):
-        res = await _post_single(panel, "/panel/api/inbounds/addClient", payload)
+        res = await xui_client.post(panel_idx, "/panel/api/inbounds/addClient", payload)
         if res:
             if res.get("success"):
                 logger.info(
@@ -248,11 +254,11 @@ async def add_client_background(
         if expire_days > 0
         else 0
     )
-    panels = await get_all_panels()
-    for panel in panels:
-        for iid in panel.get("inbound_ids", []):
-            obj = _build_client_obj(client_uuid, email, sub_id, iid, panel, exp_ms)
-            await _add_to_inbound(panel, iid, obj)
+    async with XUIClient() as xui:
+        for idx, panel in enumerate(xui.panels_list):
+            for iid in panel.get("inbound_ids", []):
+                obj = _build_client_obj(client_uuid, email, sub_id, iid, panel, exp_ms)
+                await _add_to_inbound(xui, idx, panel, iid, obj)
 
 
 # Legacy helper (still used in some places)
