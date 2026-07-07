@@ -1,8 +1,14 @@
-# Dobrinya VPN Bot v17.1 (Stable Release)
+# 🛡️ Dobrinya VPN Bot v17.1 (Stable Release)
+
+[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Security: Bandit](https://img.shields.io/badge/security-bandit-green.svg)](https://github.com/PyCQA/bandit)
 
 Профессиональное решение для управления VPN-сервисом на базе **3X-UI** (MHSanaei и др.) с поддержкой мульти-серверности и автоматического биллинга.
 
-## Ключевые возможности v17.1
+---
+
+## ✨ Ключевые возможности v17.1
 
 - **Идеальная совместимость (Proxy Mode):** Сервер подписок (`sub_server.py`) теперь транслирует нативные конфигурационные строки напрямую из 3X-UI панелей. Это гарантирует 100% работу всех функций (Reality, Vision, spiderX) во всех клиентах.
 - **Интеллектуальная синхронизация:** Забудьте о ручном копировании JSON. Одной кнопкой в Telegram-боте вы можете подтянуть все актуальные настройки Inbounds со своих серверов.
@@ -13,13 +19,13 @@
 
 ---
 
-## Установка и запуск
+## 🚀 Установка и запуск
 
 ### 1. Подготовка системы
 Рекомендуется использовать Python 3.12 или выше.
 ```bash
-git clone https://github.com/DmitriiMedvedev/dobrinya_bot
-cd dobrinya_bot/3x-ui_telegram_bot
+git clone https://github.com/DmitriiMedvedev/3x-ui_telegram_bot
+cd 3x-ui_telegram_bot
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -49,7 +55,7 @@ systemctl enable --now dobrinya-bot dobrinya-sub
 
 ---
 
-## Команды администратора
+## 🛠 Команды администратора
 
 | Команда | Описание |
 |---------|----------|
@@ -70,15 +76,21 @@ systemctl enable --now dobrinya-bot dobrinya-sub
 
 ---
 
-## Структура проекта
+## 📁 Структура проекта
 - `bot.py` — Главный процесс Telegram бота.
 - `sub_server.py` — Высокопроизводительный сервер подписок (порт 8080).
 - `xui.py` — API-клиент для взаимодействия с Xray панелями.
 - `database.py` — Уровень работы с данными (aiosqlite).
 - `billing.py` — Фоновый процесс расчета стоимости трафика.
 
-## Обновления безопасности и качества кода (Security and Code Review Updates)
+---
+
+## 🔒 Обновления безопасности и качества кода (Security and Code Review Updates)
 Был произведён комплексный аудит кодовой базы, включающий:
 - Проверку сканером безопасности **Bandit** (выявленных уязвимостей нет).
 - Линтинг при помощи **Flake8**, в ходе которого были очищены неиспользуемые импорты и поправлен синтаксис f-строк.
 - **Улучшение обработки ошибок:** Все потенциально опасные "голые" блоки `except:` заменены на перехват `except Exception as e:`. Это устраняет риск перехвата системных исключений (например, `KeyboardInterrupt` или `SystemExit`) и позволяет корректно логировать возникающие в процессе работы ошибки.
+
+---
+
+🔗 **Репозиторий проекта:** [github.com/DmitriiMedvedev/3x-ui_telegram_bot](https://github.com/DmitriiMedvedev/3x-ui_telegram_bot)
