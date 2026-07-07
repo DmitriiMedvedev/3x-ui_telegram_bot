@@ -7,7 +7,7 @@ Fallbacks to manual generation if panels are unreachable.
 import base64
 import sqlite3
 import json
-import urllib.parse
+from urllib.parse import quote
 import os
 import asyncio
 import aiohttp
@@ -126,7 +126,7 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
         if prot == "shadowsocks": prot = "ss"
         host = cfg.get("host") or panel.get("server_host") or panel.get("host") or "127.0.0.1"
         port = cfg.get("port", 443)
-        label = urllib.parse.quote(f"{email}-{panel.get('name')}-{cfg.get('label', iid)}")
+        label = quote(f"{email}-{panel.get('name')}-{cfg.get('label', iid)}")
 
         if prot == "vless":
             net, sec = cfg.get("network", "tcp"), cfg.get("security", "none")
@@ -161,7 +161,7 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
             # Remove empty parameters to clean up the URL
             params = {k: v for k, v in params.items() if v}
 
-            query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items())
+            query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
             return f"vless://{u_uuid}@{host}:{port}?{query}#{label}"
         elif prot == "ss":
             m, pwd = cfg.get("method"), cfg.get("password")
