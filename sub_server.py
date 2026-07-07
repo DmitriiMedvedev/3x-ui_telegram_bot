@@ -12,6 +12,7 @@ import os
 import asyncio
 import aiohttp
 import logging
+import time
 from aiohttp import web
 
 from config import DB_PATH
@@ -31,6 +32,10 @@ def get_db_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+_PANELS_CACHE = []
+_PANELS_CACHE_TIME = 0
+_PANELS_CACHE_TTL = 60
+
 def get_user_by_sub(sub_id: str) -> dict | None:
     conn = None
     try:
@@ -47,6 +52,11 @@ def get_user_by_sub(sub_id: str) -> dict | None:
         if conn: conn.close()
 
 def get_active_panels() -> list[dict]:
+    global _PANELS_CACHE, _PANELS_CACHE_TIME
+    now = time.time()
+    if _PANELS_CACHE_TIME > 0 and (now - _PANELS_CACHE_TIME) < _PANELS_CACHE_TTL:
+        return _PANELS_CACHE
+
     conn = None
     try:
         conn = get_db_conn()
@@ -60,6 +70,9 @@ def get_active_panels() -> list[dict]:
                 logger.warning(f"Exception caught: {e}")
                 p["inbounds"] = {}
             res.append(p)
+
+        _PANELS_CACHE = res
+        _PANELS_CACHE_TIME = now
         return res
     except Exception as e:
         logger.warning(f"Exception caught: {e}")
