@@ -76,13 +76,20 @@ async def cmd_sync(message: Message):
     msg = await message.answer("🔄 Синхронизация запущена...")
     users = await get_all_users()
     panels = await get_all_panels()
-    count = 0
+
+    clients_to_add = []
     for u in users:
         if u.get("vless_uuid") and u.get("sub_id"):
-            await XUI.add_client_background(f"user_{u['tg_id']}", u['vless_uuid'], u['sub_id'])
-            count += 1
-            if count % 10 == 0: await asyncio.sleep(0.2)
-    await msg.edit_text(f"✅ Готово! Синхронизировано пользователей: {count} на {len(panels)} панелях.")
+            clients_to_add.append({
+                "email": f"user_{u['tg_id']}",
+                "client_uuid": u['vless_uuid'],
+                "sub_id": u['sub_id']
+            })
+
+    if clients_to_add:
+        await XUI.add_clients_background(clients_to_add)
+
+    await msg.edit_text(f"✅ Готово! Синхронизировано пользователей: {len(clients_to_add)} на {len(panels)} панелях.")
 
 @router.message(Command("status"))
 async def cmd_status(message: Message):

@@ -240,6 +240,86 @@ async def get_real_inbound_id(panel: dict, tag_or_port) -> int | None:
 
 
 # Adds a client to all panels in the background.
+
+
+async def _add_clients_to_inbound(
+    panel: dict, inbound_id: int, client_objs: list
+) -> bool:
+    payload = {"id": str(inbound_id), "settings": json.dumps({"clients": client_objs})}
+
+    for attempt in range(_ADD_RETRIES):
+        res = await _post_single(panel, "/panel/api/inbounds/addClient", payload)
+        if res:
+            if res.get("success"):
+                logger.info(
+                    f"addClient (batch) success: inbound={inbound_id} count={len(client_objs)} on {panel['name']}"
+                )
+                return True
+            msg = str(res.get("msg", "")).lower()
+            logger.warning(f"addClient (batch) failed on {panel['name']}: {msg}")
+
+            # If batch fails due to duplicate, we could fall back to adding one by one,
+            # but to keep it simple, we filter duplicates out before calling this.
+
+        if attempt < _ADD_RETRIES - 1:
+            await asyncio.sleep(_RETRY_DELAYS[attempt])
+    return False
+
+
+async def add_clients_background(clients_data: list, expire_days: int = 0):
+    # clients_data: list of dicts: {"email": str, "client_uuid": str, "sub_id": str}
+    if not clients_data:
+        return
+
+    exp_ms = (
+        int((datetime.now() + timedelta(days=expire_days)).timestamp() * 1000)
+        if expire_days > 0
+        else 0
+    )
+
+    panels = await get_all_panels()
+    for panel in panels:
+        # Fetch current clients to avoid adding duplicates in batch
+        res = await _get_single(panel, "/panel/api/inbounds/list")
+        existing_emails = {}
+
+        if res and res.get("success") and res.get("obj"):
+            for ib in res.get("obj", []):
+                settings = ib.get("settings", "{}")
+                try:
+                    settings_dict = json.loads(settings)
+                    for c in settings_dict.get("clients", []):
+                        email = c.get("email")
+                        if email:
+                            existing_emails.setdefault(str(ib.get("id")), set()).add(email)
+                except Exception:
+                    pass  # nosec B110
+
+        for iid in panel.get("inbound_ids", []):
+            iid_existing = existing_emails.get(str(iid), set())
+
+            client_objs = []
+            for c_data in clients_data:
+                if c_data["email"] in iid_existing:
+                    continue
+                obj = _build_client_obj(
+                    c_data["client_uuid"],
+                    c_data["email"],
+                    c_data["sub_id"],
+                    iid,
+                    panel,
+                    exp_ms,
+                )
+                client_objs.append(obj)
+
+            # Process in chunks of 50
+            chunk_size = 50
+            for i in range(0, len(client_objs), chunk_size):
+                chunk = client_objs[i : i + chunk_size]
+                if chunk:
+                    await _add_clients_to_inbound(panel, iid, chunk)
+
+
 async def add_client_background(
     email: str, client_uuid: str, sub_id: str, expire_days: int = 0
 ):
