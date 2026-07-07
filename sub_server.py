@@ -1,11 +1,7 @@
-#!/usr/bin/env python3
-"""
-sub_server.py — Multi-Panel Subscription Proxy & Generator v17.1.
-Aggregates native subscriptions from 3X-UI panels.
-Fallbacks to manual generation if panels are unreachable.
-"""
+
 import base64
 import sqlite3
+import aiosqlite
 import json
 import urllib.parse
 import os
@@ -24,37 +20,29 @@ HEADERS = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_db_conn():
-    if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"Database not found at {DB_PATH}")
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def get_user_by_sub(sub_id: str) -> dict | None:
-    conn = None
+async def get_user_by_sub(request, sub_id: str) -> dict | None:
     try:
-        conn = get_db_conn()
-        row = conn.execute("SELECT * FROM users WHERE sub_id=?", (sub_id,)).fetchone()
+        conn = request.app['db']
+        async with conn.execute("SELECT * FROM users WHERE sub_id=?", (sub_id,)) as cursor:
+            row = await cursor.fetchone()
         if row: return dict(row)
         if sub_id.isdigit():
-            row = conn.execute("SELECT * FROM users WHERE tg_id=?", (int(sub_id),)).fetchone()
+            async with conn.execute("SELECT * FROM users WHERE tg_id=?", (int(sub_id),)) as cursor:
+                row = await cursor.fetchone()
             return dict(row) if row else None
         return None
     except Exception as e:
         logger.warning(f"Exception caught: {e}")
-    finally:
-        if conn: conn.close()
+        return None
 
-def get_active_panels() -> list[dict]:
-    conn = None
+async def get_active_panels(request) -> list[dict]:
     try:
-        conn = get_db_conn()
-        rows = conn.execute("SELECT * FROM panels").fetchall()
+        conn = request.app['db']
+        async with conn.execute("SELECT * FROM panels") as cursor:
+            rows = await cursor.fetchall()
         res = []
         for r in rows:
             p = dict(r)
-            # Декодируем inbounds из JSON
             try: p['inbounds'] = json.loads(p.get('inbounds') or '{}')
             except Exception as e:
                 logger.warning(f"Exception caught: {e}")
@@ -64,21 +52,15 @@ def get_active_panels() -> list[dict]:
     except Exception as e:
         logger.warning(f"Exception caught: {e}")
         return []
-    finally:
-        if conn: conn.close()
 
 async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: str) -> str:
-    """Запрашивает нативную подписку с конкретной панели, перебирая варианты URL."""
-    # Перебираем как IP/хост API, так и публичный host сервера
     hosts = [panel.get('host', "").strip().strip(".")]
     if panel.get('server_host'):
         hosts.append(panel.get('server_host').strip())
 
-    # Варианты путей
-    base_paths = ["", panel.get('path', "")]
+    base_paths = ["", panel.get('path') or ""]
     sub_paths = ["/sub", "/sub/v2"]
 
-    # If panel has API Token, use it as fallback auth for sub endpoint if panel restricts it
     headers = dict(session._default_headers) if session._default_headers else {}
     if panel.get("api_token"):
         headers["Authorization"] = f"Bearer {panel['api_token']}"
@@ -87,7 +69,7 @@ async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: s
         if not host: continue
         for proto in ["https", "http"]:
             for bp in base_paths:
-                bp = bp.strip("/")
+                if bp: bp = bp.strip("/")
                 if bp: bp = "/" + bp
                 for sp in sub_paths:
                     url = f"{proto}://{host}:{panel['port']}{bp}{sp}/{sub_id}"
@@ -105,10 +87,8 @@ async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: s
     return ""
 
 def decode_sub(content: str) -> list[str]:
-    """Декодирует base64 или plain-text подписку в список ссылок."""
     if not content or not content.strip(): return []
     try:
-        # Пробуем декодировать как base64
         data = content.strip()
         missing_padding = len(data) % 4
         if missing_padding: data += '=' * (4 - missing_padding)
@@ -116,11 +96,9 @@ def decode_sub(content: str) -> list[str]:
         return [l.strip() for l in decoded.split('\n') if l.strip()]
     except Exception as e:
         logger.warning(f"Exception caught: {e}")
-        # Если не base64, возможно это просто список ссылок
         return [l.strip() for l in content.split('\n') if l.strip() and "://" in l]
 
 def make_fallback_link(u_uuid, email, panel, cfg, iid):
-    """Генерация ссылки вручную, если проксирование не сработало."""
     try:
         prot = str(cfg.get("protocol", "")).lower()
         if prot == "shadowsocks": prot = "ss"
@@ -158,7 +136,6 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
                     if cfg.get("path"): params["path"] = cfg["path"]
                     if cfg.get("ws_host"): params["host"] = cfg["ws_host"]
 
-            # Remove empty parameters to clean up the URL
             params = {k: v for k, v in params.items() if v}
 
             query = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items())
@@ -176,14 +153,13 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
 async def handle_sub(request: web.Request) -> web.Response:
     try:
         sub_id = request.match_info.get("sub_id", "")
-        user = get_user_by_sub(sub_id)
+        user = await get_user_by_sub(request, sub_id)
         if not user: return web.Response(text=f"ERROR: User with Sub ID '{sub_id}' not found in Database.", status=404)
 
         u_uuid, email = user.get("vless_uuid"), f"user_{user['tg_id']}"
-        panels = get_active_panels()
+        panels = await get_active_panels(request)
         all_links = []
 
-        # 1. Пытаемся получить нативные ссылки (Proxy mode)
         diag_log = [f"Sub Request: {sub_id}", f"User: {email}", f"UUID: {u_uuid}", f"Panels count: {len(panels)}"]
 
         async with aiohttp.ClientSession(headers=HEADERS) as session:
@@ -198,7 +174,6 @@ async def handle_sub(request: web.Request) -> web.Response:
                 else:
                     diag_log.append(f" - Panel '{p['name']}': Failed (unreachable or 404).")
 
-        # 2. Если проксирование не дало результатов, генерируем сами (Fallback mode)
         if not all_links:
             diag_log.append("Proxy failed for all panels. Trying fallback generation...")
             for p in panels:
@@ -234,7 +209,17 @@ async def handle_sub(request: web.Request) -> web.Response:
 async def handle_index(request):
     return web.Response(text=f"Dobrinya Subscription Server v17.1 is active.\nDB: {'✅' if os.path.exists(DB_PATH) else '❌ NOT FOUND'}")
 
+async def init_db(app):
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(f"Database not found at {DB_PATH}")
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    app['db'] = db
+    yield
+    await db.close()
+
 app = web.Application()
+app.cleanup_ctx.append(init_db)
 app.router.add_get("/", handle_index)
 app.router.add_get("/sub/{sub_id}", handle_sub)
 
