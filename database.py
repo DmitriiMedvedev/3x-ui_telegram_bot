@@ -6,9 +6,11 @@ import aiosqlite
 import logging
 import json
 import uuid
+import copy
 
 
 logger  = logging.getLogger(__name__)
+_panels_cache = None
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -136,6 +138,10 @@ async def get_all_users() -> list[dict]:
 # ── Panels ──
 
 async def get_all_panels() -> list[dict]:
+    global _panels_cache
+    if _panels_cache is not None:
+        return copy.deepcopy(_panels_cache)
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = await (await db.execute("SELECT * FROM panels")).fetchall()
@@ -146,7 +152,8 @@ async def get_all_panels() -> list[dict]:
             p['billing_inbound_ids'] = _safe_json_list(p.get('billing_inbound_ids'))
             p['inbounds'] = _safe_json_dict(p.get('inbounds'))
             res.append(p)
-        return res
+        _panels_cache = res
+        return copy.deepcopy(res)
 
 async def get_panel(panel_id: int) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -161,17 +168,23 @@ async def get_panel(panel_id: int) -> dict | None:
         return None
 
 async def delete_panel(panel_id: int):
+    global _panels_cache
+    _panels_cache = None
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM panels WHERE id = ?", (panel_id,))
         await db.commit()
 
 async def add_panel(name, host, port, path, login, password, server_host, api_token="") -> int:
+    global _panels_cache
+    _panels_cache = None
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("INSERT INTO panels (name, host, port, path, login, password, api_token, server_host) VALUES (?,?,?,?,?,?,?,?)", (name, host, port, path, login, password, api_token, server_host))
         await db.commit()
         return cur.lastrowid
 
 async def update_panel_inbounds(panel_id: int, ib_ids, bib_ids, inbounds: dict):
+    global _panels_cache
+    _panels_cache = None
     async with aiosqlite.connect(DB_PATH) as db:
         clean_inbounds = {str(k): v for k, v in inbounds.items()}
         await db.execute("UPDATE panels SET inbound_ids=?, billing_inbound_ids=?, inbounds=? WHERE id=?", (json.dumps(ib_ids), json.dumps(bib_ids), json.dumps(clean_inbounds), panel_id))
