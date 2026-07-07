@@ -92,7 +92,7 @@ async def fetch_panel_sub(session: aiohttp.ClientSession, panel: dict, sub_id: s
                 for sp in sub_paths:
                     url = f"{proto}://{host}:{panel['port']}{bp}{sp}/{sub_id}"
                     try:
-                        async with session.get(url, headers=headers, timeout=3.0, ssl=False) as resp:
+                        async with session.get(url, headers=headers, timeout=3.0) as resp:
                             if resp.status == 200:
                                 text = await resp.text()
                                 if text and len(text) > 10:

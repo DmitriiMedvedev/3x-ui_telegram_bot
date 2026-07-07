@@ -25,9 +25,9 @@ _RETRY_DELAYS = (0.5, 1.5, 3.0)
 
 
 def _new_session() -> aiohttp.ClientSession:
-    """Сессия без SSL-верификации (self-signed на localhost)."""
+    """Сессия для работы с API панелей."""
     return aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(ssl=False, use_dns_cache=False),
+        connector=aiohttp.TCPConnector(use_dns_cache=False),
         cookie_jar=aiohttp.CookieJar(unsafe=True),
         timeout=aiohttp.ClientTimeout(total=20),
     )
