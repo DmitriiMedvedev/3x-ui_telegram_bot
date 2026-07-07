@@ -57,7 +57,7 @@ async def _login(session: aiohttp.ClientSession, panel: Dict) -> bool:
             if not ok:
                 logger.error(f"3X-UI login failed on {panel['name']}: {res}")
             return ok
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.error(f"3X-UI login error on {panel['name']}: {e}")
         return False
 
@@ -108,7 +108,7 @@ class XUIClient:
                     except json.JSONDecodeError:
                         return None
                 return None
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"XUIClient POST {endpoint} on {panel['name']}: {e}")
         return None
 
@@ -139,7 +139,7 @@ async def _post_single(panel: dict, endpoint: str, payload: dict) -> dict | None
                     except json.JSONDecodeError:
                         return None
                 return None
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"xui POST {endpoint} on {panel['name']}: {e}")
             return None
 
@@ -168,7 +168,7 @@ async def _get_single(panel: dict, endpoint: str) -> dict | None:
                     except json.JSONDecodeError:
                         return None
                 return None
-        except Exception as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"xui GET {endpoint} on {panel['name']}: {e}")
             return None
 
@@ -435,8 +435,10 @@ async def bulk_toggle(clients: list[tuple[str, str, bool, str]]) -> int:
                         )
                         if res and res.get("success"):
                             ok_count += 1
-    except Exception as e:
-        logger.error(f"bulk_toggle: {e}")
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logger.error(f"bulk_toggle network error: {e}")
+    except json.JSONDecodeError as e:
+        logger.error(f"bulk_toggle JSON error: {e}")
     return ok_count
 
 
