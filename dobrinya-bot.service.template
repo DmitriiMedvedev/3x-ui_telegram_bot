@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/dobrinya_bot/3x-ui_telegram_bot
-ExecStart=/root/dobrinya_bot/3x-ui_telegram_bot/venv/bin/python bot.py
+User={{USER}}
+WorkingDirectory={{APP_DIR}}
+ExecStart={{APP_DIR}}/venv/bin/python bot.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

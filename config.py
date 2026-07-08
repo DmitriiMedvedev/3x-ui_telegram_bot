@@ -27,11 +27,7 @@ SUB_PORT     = int(os.getenv('SUB_PORT', 8080))
 SUB_BASE_URL = os.getenv('SUB_BASE_URL', f'http://{os.getenv("SERVER_HOST_1", "YOUR_SERVER_IP")}:{SUB_PORT}/sub')
 
 # Определение пути к БД (абсолютный путь для стабильности служб)
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(_BASE_DIR, "dobrinya.db")
-# Резервный путь для сервера
-if not os.path.exists(DB_PATH) and "/root/" in _BASE_DIR:
-    DB_PATH = "/root/dobrinya_bot/3x-ui_telegram_bot/dobrinya.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dobrinya.db")
 
 
 # ── Тарифы и оплата ────────────────────────────────────────────────────────────

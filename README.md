@@ -21,37 +21,29 @@
 
 ## 🚀 Установка и запуск
 
-### 1. Подготовка системы
-Рекомендуется использовать Python 3.12 или выше.
+### 1. Подготовка системы и окружения
+Склонируйте репозиторий и создайте файл `.env` на основе примера:
 ```bash
 git clone https://github.com/DmitriiMedvedev/3x-ui_telegram_bot
 cd 3x-ui_telegram_bot
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
 ```
-
-### 2. Настройка окружения
-Создайте файл `.env` на основе примера:
+Создайте `.env` файл:
 ```ini
 BOT_TOKEN="токен от @BotFather"
 SUB_BASE_URL="http://ip_сервера:8080/sub"
 ADMIN_IDS="ваш_id,id_помощника"
 ```
 
+### 2. Автоматическая установка и запуск (Systemd)
+В проекте есть скрипт `install.sh`, который сам создаст виртуальное окружение, установит зависимости и настроит systemd службы `dobrinya-bot` и `dobrinya-sub`.
+```bash
+./install.sh
+```
+
 ### 3. Настройка в Telegram
 1. Напишите боту `/addserver`. Укажите IP, порт и **API Token** (можно создать в настройках 3X-UI).
 2. Зайдите в меню администратора: `/admin` -> **Серверы** -> Ваш сервер -> **🌐 Обновить из 3X-UI**.
 3. Выполните `/sync`, чтобы добавить всех текущих пользователей на новые конфиги.
-
-### 4. Автозапуск (Systemd)
-В проекте уже есть готовые `.service` файлы.
-```bash
-cp dobrinya-bot.service /etc/systemd/system/
-cp dobrinya-sub.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now dobrinya-bot dobrinya-sub
-```
 
 ---
 
