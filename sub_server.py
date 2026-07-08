@@ -114,7 +114,7 @@ def make_fallback_link(u_uuid, email, panel, cfg, iid):
                     "fp": cfg.get("fingerprint", "chrome"),
                     "sni": cfg.get("sni", ""),
                     "sid": cfg.get("short_id", ""),
-                    "spx": cfg.get("spiderX", "/")
+                    "spx": cfg.get("spiderX") or "/"
                 })
                 if cfg.get("flow"): params["flow"] = cfg["flow"]
             elif sec == "tls":

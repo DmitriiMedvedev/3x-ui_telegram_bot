@@ -325,7 +325,7 @@ def make_vless_link(client_uuid: str, email: str, panel: dict, inbound_id: int) 
             "fp": cfg.get("fingerprint", "chrome"),
             "sni": cfg.get("sni", ""),
             "sid": cfg.get("short_id", ""),
-            "spx": cfg.get("spiderX", "/")
+            "spx": cfg.get("spiderX") or "/"
         })
         if cfg.get("flow"): params["flow"] = cfg["flow"]
     elif sec == "tls":

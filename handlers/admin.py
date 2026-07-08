@@ -212,7 +212,7 @@ async def psync_ibs(callback: CallbackQuery):
                     "fingerprint": (rs.get("settings") or {}).get("fingerprint", "chrome"),
                     "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
                     "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                    "spiderX": (rs.get("settings") or {}).get("spiderX", "/")
+                    "spiderX": (rs.get("settings") or {}).get("spiderX") or "/"
                 })
                 cls = (ib.get("settings") or {}).get("clients", [])
                 cfg["flow"] = cls[0].get("flow", "") if cls else ""
@@ -395,7 +395,7 @@ async def process_inbound_json(message: Message, state: FSMContext):
                 "fingerprint": (rs.get("settings") or {}).get("fingerprint", "chrome"),
                 "sni": rs.get("serverNames", [""])[0] if rs.get("serverNames") else "",
                 "short_id": rs.get("shortIds", [""])[0] if rs.get("shortIds") else "",
-                "spiderX": (rs.get("settings") or {}).get("spiderX", "/")
+                "spiderX": (rs.get("settings") or {}).get("spiderX") or "/"
             })
             cls = (inbound.get("settings") or {}).get("clients", [])
             cfg["flow"] = cls[0].get("flow", "") if cls else ""
